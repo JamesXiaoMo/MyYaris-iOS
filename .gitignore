@@ -50,3 +50,11 @@ Podfile.lock
 *.cer
 *.key
 *.pem
+
+# Flutter editor and generated outputs
+.idea/
+*.iml
+coverage/
+
+# Xcode command cache (not project source)
+ios/com.apple.DeveloperTools/
