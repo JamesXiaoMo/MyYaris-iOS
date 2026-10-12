@@ -246,7 +246,7 @@ class _HomePage extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         const SizedBox(height: 280, child: CarModel()),
-        const SizedBox(height: 36),
+        const SizedBox(height: 30),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
