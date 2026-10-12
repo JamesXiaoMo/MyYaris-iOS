@@ -35,6 +35,15 @@ import UniformTypeIdentifiers
         picker.allowsMultipleSelection = false
         self.audioPickerResult = result
         presenter.present(picker, animated: true)
+      case "saveEvidence":
+        guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json"].contains(name),
+              let bytes = payload["bytes"] as? FlutterStandardTypedData,
+              let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+          result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return
+        }
+        do { try bytes.data.write(to: root.appendingPathComponent(name)); result(nil) }
+        catch { result(FlutterError(code: "EVIDENCE_WRITE", message: "验收文件保存失败", details: nil)) }
       case "load":
         var lookup = query
         lookup[kSecReturnData as String] = true

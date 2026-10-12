@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'backend.dart';
 import 'contracts.dart';
+import 'favorites.dart';
+import 'favorites_page.dart';
 
 const _muted = Color(0xFF9398A6);
 
@@ -108,8 +110,10 @@ Widget heading(String title, String subtitle) => Padding(
         title,
         style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
       ),
-      const SizedBox(height: 8),
-      Text(subtitle, style: const TextStyle(color: _muted)),
+      if (subtitle.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(subtitle, style: const TextStyle(color: _muted)),
+      ],
     ],
   ),
 );
@@ -294,7 +298,7 @@ class _NavigationPageState extends State<NavigationPage> {
     return ListView(
       padding: const EdgeInsets.all(22),
       children: [
-        heading('导航', '先解析候选，确认后才派发到指定车机。'),
+        heading('行驶', ''),
         card([
           TextField(
             key: const ValueKey('destination-input'),
@@ -311,7 +315,7 @@ class _NavigationPageState extends State<NavigationPage> {
             key: const ValueKey('destination-preview'),
             onPressed: busy || resolved != null ? null : resolve,
             icon: const Icon(Icons.place_outlined),
-            label: Text(busy ? '处理中…' : '解析目的地（不派发）'),
+            label: Text(busy ? '处理中…' : '解析目的地'),
           ),
           if (error != null)
             Padding(
@@ -322,16 +326,38 @@ class _NavigationPageState extends State<NavigationPage> {
               ),
             ),
         ]),
-        TextButton.icon(
-          onPressed: busy || resolved != null ? null : uploadVoice,
-          icon: const Icon(Icons.audio_file_outlined),
-          label: const Text('选择短音频并上传解析'),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            key: const ValueKey('favorites-open'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+            ),
+            onPressed: busy
+                ? null
+                : () async {
+                    final favorite = await Navigator.push<Favorite>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FavoritesPage(api: widget.session.api),
+                      ),
+                    );
+                    if (favorite == null || !mounted) return;
+                    setState(() {
+                      input.text = favorite.coordinates;
+                      resolved = null;
+                      query = null;
+                      error = null;
+                      resolveKey = null;
+                      dispatchKey = null;
+                      resolveInput = null;
+                    });
+                  },
+            icon: const Icon(Icons.bookmarks_outlined),
+            label: const Text('收藏夹', style: TextStyle(fontSize: 20)),
+          ),
         ),
-        const Text(
-          '使用已有音频文件，不申请麦克风权限；上传前会确认。',
-          style: TextStyle(color: _muted, fontSize: 12),
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         if (resolved != null)
           card([
             const Text(
@@ -396,28 +422,6 @@ class _NavigationPageState extends State<NavigationPage> {
               ),
             ],
           ),
-        AnimatedBuilder(
-          animation: widget.session,
-          builder: (context, _) => card([
-            Text(
-              '任务：${widget.session.taskLabel}',
-              style: const TextStyle(fontSize: 18),
-            ),
-            if (widget.session.lastTask.isNotEmpty)
-              Text(
-                '${widget.session.lastTask['title'] ?? ''}\n${widget.session.lastTask['task_id'] ?? ''}',
-              ),
-            const SizedBox(height: 8),
-            const Text(
-              '“已请求打开”不代表导航已经开始。路线需在车机端确认。',
-              style: TextStyle(color: _muted),
-            ),
-            TextButton(
-              onPressed: () => widget.session.refresh(),
-              child: const Text('刷新任务回执'),
-            ),
-          ]),
-        ),
       ],
     );
   }

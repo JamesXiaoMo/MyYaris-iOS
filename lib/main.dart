@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'car_model.dart';
+import 'verification/favorites_evidence.dart';
 import 'api/backend.dart';
 import 'api/pages.dart';
 import 'package:flutter/cupertino.dart';
@@ -24,6 +25,8 @@ class MyYarisApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'MyYaris',
+    builder: (context, child) =>
+        RepaintBoundary(key: evidenceBoundary, child: child!),
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       brightness: Brightness.dark,
@@ -58,7 +61,16 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
     super.initState();
     session = widget.session ?? BackendSession();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(session.initialize());
+    unawaited(
+      session.initialize().then((_) async {
+        if (const bool.fromEnvironment('MY_YARIS_FAVORITES_VERIFY') &&
+            mounted) {
+          await verifyFavoritesOnDevice(session.api, context, () {
+            if (mounted) setState(() => _index = 1);
+          });
+        }
+      }),
+    );
   }
 
   @override
@@ -162,7 +174,7 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
             child: Row(
               children: [
                 _tab(0, '首页', CupertinoIcons.house_fill),
-                _tab(1, '导航', CupertinoIcons.location_north_fill),
+                _tab(1, '行驶', CupertinoIcons.location_north_fill),
                 _tab(2, '音乐', CupertinoIcons.music_note),
                 _tab(3, '设置', CupertinoIcons.gear_solid),
               ],
