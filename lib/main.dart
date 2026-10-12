@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'api/backend.dart';
+import 'api/pages.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,96 +42,132 @@ class MyYarisApp extends StatelessWidget {
 }
 
 class YarisShell extends StatefulWidget {
-  const YarisShell({super.key});
+  const YarisShell({super.key, this.session});
+  final BackendSession? session;
 
   @override
   State<YarisShell> createState() => _YarisShellState();
 }
 
-class _YarisShellState extends State<YarisShell> {
+class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
   int _index = 0;
-  bool _playing = false;
-  bool _repeat = true;
-
-  void _demo(String action) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$action · 本地演示，未接入车机或后端')));
+  late final BackendSession session;
+  @override
+  void initState() {
+    super.initState();
+    session = widget.session ?? BackendSession();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(session.initialize());
   }
 
   @override
-  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: SystemUiOverlayStyle.light,
-    child: Scaffold(
-      body: Stack(
-        children: [
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 540,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: _index == 0
-                      ? const [
-                          Color(0xFF08132F),
-                          Color(0xFF252439),
-                          Color(0xFFCE9877),
-                          Color(0xFF333640),
-                          _background,
-                        ]
-                      : const [Color(0xFF08132F), _background],
-                  stops: _index == 0 ? const [0, .35, .58, .68, 1] : null,
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    session.setForeground(state == AppLifecycleState.resumed);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (widget.session == null) session.dispose();
+    super.dispose();
+  }
+
+  Future<void> _command(
+    String action, [
+    Map<String, dynamic> params = const {},
+  ]) async {
+    try {
+      await session.sendCommand(action, params);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('指令已提交，等待车机回报')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: session,
+    builder: (context, _) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        body: Stack(
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 540,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: _index == 0
+                        ? const [
+                            Color(0xFF08132F),
+                            Color(0xFF252439),
+                            Color(0xFFCE9877),
+                            Color(0xFF333640),
+                            _background,
+                          ]
+                        : const [Color(0xFF08132F), _background],
+                    stops: _index == 0 ? const [0, .35, .58, .68, 1] : null,
+                  ),
                 ),
               ),
             ),
+            SafeArea(
+              bottom: false,
+              child: IndexedStack(
+                index: _index,
+                children: [
+                  _HomePage(
+                    session: session,
+                    playing: session.playing,
+                    repeat: session.playback['loop_mode'] == 'all',
+                    onPlay: () =>
+                        _command(session.playing ? 'pause' : 'resume'),
+                    onRepeat: () => _command('set_loop', {
+                      'loop_mode': session.playback['loop_mode'] == 'all'
+                          ? 'one'
+                          : 'all',
+                    }),
+                    onDemo: (label) =>
+                        _command(label == '上一曲' ? 'prev' : 'next'),
+                    onNavigate: () => setState(() => _index = 1),
+                    onMusic: () => setState(() => _index = 2),
+                  ),
+                  NavigationPage(session: session),
+                  MusicPage(session: session),
+                  SettingsPage(session: session),
+                ],
+              ),
+            ),
+          ],
+        ),
+        bottomNavigationBar: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1017),
+            border: Border(top: BorderSide(color: Color(0xFF20232A))),
           ),
-          SafeArea(
-            bottom: false,
-            child: IndexedStack(
-              index: _index,
+          child: SafeArea(
+            top: false,
+            child: Row(
               children: [
-                _HomePage(
-                  playing: _playing,
-                  repeat: _repeat,
-                  onPlay: () {
-                    setState(() => _playing = !_playing);
-                    _demo('播放状态已切换');
-                  },
-                  onRepeat: () {
-                    setState(() => _repeat = !_repeat);
-                    _demo('循环模式已切换');
-                  },
-                  onDemo: _demo,
-                  onNavigate: () => setState(() => _index = 1),
-                  onMusic: () => setState(() => _index = 2),
-                ),
-                const _InputPage(isMusic: false),
-                const _InputPage(isMusic: true),
-                const _SettingsPage(),
+                _tab(0, '首页', CupertinoIcons.house_fill),
+                _tab(1, '导航', CupertinoIcons.location_north_fill),
+                _tab(2, '音乐', CupertinoIcons.music_note),
+                _tab(3, '设置', CupertinoIcons.gear_solid),
               ],
             ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Color(0xFF0D1017),
-          border: Border(top: BorderSide(color: Color(0xFF20232A))),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Row(
-            children: [
-              _tab(0, '首页', CupertinoIcons.house_fill),
-              _tab(1, '导航', CupertinoIcons.location_north_fill),
-              _tab(2, '音乐', CupertinoIcons.music_note),
-              _tab(3, '设置', CupertinoIcons.gear_solid),
-            ],
           ),
         ),
       ),
@@ -169,6 +208,7 @@ class _YarisShellState extends State<YarisShell> {
 
 class _HomePage extends StatelessWidget {
   const _HomePage({
+    required this.session,
     required this.playing,
     required this.repeat,
     required this.onPlay,
@@ -177,6 +217,7 @@ class _HomePage extends StatelessWidget {
     required this.onNavigate,
     required this.onMusic,
   });
+  final BackendSession session;
   final bool playing, repeat;
   final VoidCallback onPlay, onRepeat, onNavigate, onMusic;
   final ValueChanged<String> onDemo;
@@ -199,7 +240,7 @@ class _HomePage extends StatelessWidget {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
             _badge(
-              'Tailscale · 演示',
+              session.api.configured ? session.connection : '未配置后端',
               const Color(0xFF48D882),
               icon: Icons.circle,
               iconSize: 8,
@@ -207,8 +248,8 @@ class _HomePage extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        const Text(
-          '已连接',
+        Text(
+          session.connection,
           style: TextStyle(
             fontSize: 40,
             fontWeight: FontWeight.w700,
@@ -216,8 +257,8 @@ class _HomePage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 7),
-        const Text(
-          '演示状态 · Tailscale HTTPS 专网\nR9000P 与车机尚未接入',
+        Text(
+          '${session.realtime} · HTTPS 私网\n车机状态：服务器快照，需核对实际执行',
           style: TextStyle(color: _muted, fontSize: 12, height: 1.5),
         ),
         const SizedBox(height: 10),
@@ -311,11 +352,15 @@ class _HomePage extends StatelessWidget {
         _panel(
           child: Column(
             children: [
-              _device('R9000P 远端后端', '未接入 · 演示', CupertinoIcons.cloud_fill),
+              _device(
+                'R9000P 远端后端',
+                session.connection,
+                CupertinoIcons.cloud_fill,
+              ),
               const Divider(color: Color(0xFF242830), height: 22),
               _device(
                 'Ottocast P3 Pro 车机',
-                '未接入 · 演示',
+                session.statusReceivedAt != null ? '已收到快照' : '状态待核实',
                 CupertinoIcons.device_phone_portrait,
               ),
             ],
@@ -394,19 +439,23 @@ class _HomePage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            navigation ? '广岛和平公园' : 'Lemon',
+            navigation
+                ? '${session.lastTask['title'] ?? '暂无目的地'}'
+                : '${session.currentTrack['title'] ?? session.playback['current_track_id'] ?? '暂无曲目'}',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 5),
           Text(
-            navigation ? '最近导航任务（演示）' : '米津玄师 · 演示曲目',
+            navigation
+                ? '最近提交的导航任务'
+                : '${session.currentTrack['artist'] ?? '车机状态回报'}',
             style: const TextStyle(color: _muted, fontSize: 11),
           ),
           const SizedBox(height: 9),
           _badge(
             navigation
-                ? '已请求打开 · 演示'
-                : '${playing ? "播放中" : "已暂停"} · 02:45 / 04:15',
+                ? session.taskLabel
+                : '${session.playback['playback_state'] ?? '状态未知'}',
             color,
             icon: navigation ? Icons.circle : CupertinoIcons.music_note,
             iconSize: 9,
@@ -482,143 +531,3 @@ Widget _device(String title, String status, IconData icon) => Row(
     Text(status, style: const TextStyle(color: _muted, fontSize: 10)),
   ],
 );
-
-class _InputPage extends StatefulWidget {
-  const _InputPage({required this.isMusic});
-  final bool isMusic;
-  @override
-  State<_InputPage> createState() => _InputPageState();
-}
-
-class _InputPageState extends State<_InputPage> {
-  final _input = TextEditingController();
-  String? _preview;
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(22, 26, 22, 24),
-    children: [
-      Text(
-        widget.isMusic ? '音乐' : '导航',
-        style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        widget.isMusic ? '想听的音乐，随手找到。' : '下一站，想去哪里？',
-        style: const TextStyle(color: _muted, fontSize: 16),
-      ),
-      const SizedBox(height: 28),
-      _panel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.isMusic ? '歌曲 / 歌单' : '目的地',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              key: ValueKey(
-                widget.isMusic ? 'music-input' : 'destination-input',
-              ),
-              controller: _input,
-              minLines: 2,
-              maxLines: 4,
-              decoration: InputDecoration(
-                hintText: widget.isMusic
-                    ? '输入歌曲名、歌单或音乐链接'
-                    : '输入坐标、Plus Code 或地图链接',
-                border: const OutlineInputBorder(),
-                hintStyle: const TextStyle(fontSize: 14, color: _muted),
-              ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              key: ValueKey(
-                widget.isMusic ? 'music-preview' : 'destination-preview',
-              ),
-              onPressed: () {
-                FocusScope.of(context).unfocus();
-                setState(
-                  () => _preview = _input.text.trim().isEmpty
-                      ? '请先输入内容'
-                      : '本地预览：${_input.text.trim()}\n未发送，未接入后端或车机。',
-                );
-              },
-              icon: Icon(
-                widget.isMusic
-                    ? CupertinoIcons.search
-                    : CupertinoIcons.paperplane,
-              ),
-              label: Text(widget.isMusic ? '预览搜索（演示）' : '预览发送（演示）'),
-            ),
-            if (_preview != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 15),
-                child: Text(
-                  _preview!,
-                  style: const TextStyle(color: _blue, height: 1.5),
-                ),
-              ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 18),
-      _panel(
-        child: Text(
-          widget.isMusic
-              ? '尚未接入网易云或车机播放器。\n所有操作只在本机展示，不会播放音乐。'
-              : '尚未接入地图解析或车机下发。\n真实路线需以后在车机端确认。',
-          style: const TextStyle(color: _muted, height: 1.7),
-        ),
-      ),
-    ],
-  );
-}
-
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage();
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(22),
-    children: [
-      const Text(
-        '设置',
-        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 24),
-      _panel(
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'MyYaris',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-            ),
-            SizedBox(height: 8),
-            Text('0.1.0 · 页面演示版', style: TextStyle(color: _muted)),
-            SizedBox(height: 20),
-            Text('网络与凭据', style: TextStyle(fontSize: 17)),
-            SizedBox(height: 8),
-            Text(
-              '未配置后端地址；未保存或读取 token。\nTailscale 状态与车机信息均为演示。',
-              style: TextStyle(color: _muted, height: 1.7),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 16),
-      _panel(
-        child: const Text(
-          '此版本仅用于页面与安装验证。\n导航、音乐和设备状态尚未接入。',
-          style: TextStyle(color: _muted, height: 1.7),
-        ),
-      ),
-    ],
-  );
-}

@@ -80,14 +80,14 @@ Future<void> main() async {
       image.dispose();
     }
 
-    await capture('home-flutter-${size.width.toInt()}');
+    await capture('home-api-${size.width.toInt()}');
     await controller.drag(
       find.byKey(const ValueKey('home-scroll')),
       const Offset(0, -500),
     );
     await controller.pump(const Duration(milliseconds: 300));
     if (size.width == 390) {
-      await capture('home-details-flutter-390');
+      await capture('home-details-api-390');
     }
     for (var tab = 1; tab < 4; tab++) {
       await controller.tap(find.byKey(ValueKey('tab-$tab')));
@@ -95,7 +95,7 @@ Future<void> main() async {
       await controller.pump(const Duration(milliseconds: 200));
       final page = ['home', 'navigation', 'music', 'settings'][tab];
       if (size.width == 390) {
-        await capture('$page-flutter-390');
+        await capture('$page-api-390');
       }
     }
     await controller.tap(find.byKey(const ValueKey('tab-1')));
@@ -106,8 +106,10 @@ Future<void> main() async {
     input.controller!.text = '34.39,132.45';
     await controller.tap(find.byKey(const ValueKey('destination-preview')));
     await controller.pump(const Duration(milliseconds: 100));
-    if (find.textContaining('未发送，未接入').evaluate().length != 1) {
-      errors.add('local input preview failed for $size');
+    if (find.textContaining('请先在设置中配置手机 Token').evaluate().length != 1) {
+      errors.add(
+        'unconfigured request must be rejected before network for $size',
+      );
     }
     stdout.writeln('layout and four tabs verified: $size');
   }
