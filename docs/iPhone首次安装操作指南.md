@@ -11,7 +11,7 @@
 ```sh
 cd /path/to/user/Desktop/MyYaris/ios_app
 /path/to/user/source/flutter/bin/flutter --no-version-check pub get
-/path/to/user/source/flutter/bin/flutter --no-version-check build ios --debug --config-only --no-codesign
+/path/to/user/source/flutter/bin/flutter --no-version-check build ios --release --config-only --no-codesign
 open -a Xcode ios/Runner.xcworkspace
 ```
 
@@ -27,7 +27,11 @@ open -a Xcode ios/Runner.xcworkspace
 
 本版没有推送、iCloud 或其他需付费的服务依赖，首次安装不需要 SideStore、Anisette 或后端网络。
 
-## 3. 选择真机，点击 Run
+## 3. 选择 Release 真机版本，点击 Run
+
+**日常从手机图标启动要用 Release。** Flutter 真机 Debug 版依赖调试器，可能出现“Xcode Run 正常，手机点图标就退出”。之前指南默认 Debug 已更正。2026-10-12 已将共享 scheme 的 Run 默认配置改为 Release；如果 Xcode 已打开，仍需在下面步骤确认当前配置。
+
+先点击 **Product → Scheme → Edit Scheme… → 左侧 Run → Info → Build Configuration → Release**，点击 Close。不要仅取消 Debug executable 而保留 Debug 配置，那不会把 App 变成 Release。
 
 1. Xcode 顶部的 scheme 选 **Runner**；右侧运行目标选**你的真实 iPhone**，不是 Any iOS Device 或模拟器。
 2. 若 Xcode 显示 **Preparing device／Connecting／Developer Mode disabled** 等提示，按提示完成准备；不要急着重复点击。
@@ -36,7 +40,7 @@ open -a Xcode ios/Runner.xcworkspace
 5. 若手机提示 **Untrusted Developer／不受信任的开发者**：打开 **设置 → 通用 → VPN 与设备管理 → 开发者 App**，选择自己的开发身份并信任；若出现 **Allow & Restart／允许并重新启动**，按手机提示自行确认。没有该提示则跳过。
 6. 若 Mac 弹出 `codesign` 访问开发私钥的钥匙串提示，在确认是本次 Xcode 构建后由你按提示授权；不用把 Mac 密码告诉聊天。
 
-**成功标准**：iPhone 主屏出现 **MyYaris**，App 实际打开，首页／导航／音乐／设置四个 Tab 可切换。界面显示演示状态是正常的，本版不连接真实车机或后端。只有达到这个标准才能说安装成功。
+**成功标准**：Run 安装完成后点击 Xcode **■ Stop**，在手机上点 **MyYaris** 图标独立打开，再退出并重新打开一次，首页／导航／音乐／设置四个 Tab 可切换。界面显示演示状态是正常的，本版不连接真实车机或后端。只有达到这个标准才能说安装成功。
 
 ## 4. 出错时先给脱敏错误，不删除其他证书
 
@@ -67,3 +71,10 @@ open -a Xcode ios/Runner.xcworkspace
 部署前必须验证：LocalDevVPN 开启期间，手机能否访问拟定的 Anisette 地址。若服务仅在 Tailscale 私网，而 VPN 切换使 Tailscale 失联，续签会被阻断；刷新后也要确认 Tailscale 已恢复。不要公开现有 FastAPI 后端来解决这个问题。Anisette 自托管不能替代 Apple 授权，Mac 仍负责 Flutter iOS 新版本构建。Ubuntu 定时服务不能保证 iOS 后台一定执行。[SideStore 自托管说明](https://docs.sidestore.io/docs/advanced/anisette)、[SideStore Wi-Fi／VPN 条件](https://docs.sidestore.io/docs/installation/prerequisites)、[Tailscale On Demand 影响](https://tailscale.com/docs/features/client/ios-vpn-on-demand)
 
 官方安装依据（2026-10-12 查询）：[Flutter iOS 设置](https://docs.flutter.dev/platform-integration/ios/setup)、[Apple 运行真机 App](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)、[Apple Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)。
+
+
+### 已安装后“Xcode 能开、图标闪退”的处理
+
+无需删 App、证书或改账号。切换 Run 的 Build Configuration 为 **Release**，选同一 iPhone、同一 Team／Bundle ID 再次 ▶ Run，覆盖安装；然后 ■ Stop，在手机图标上重新启动验证。Release 使用 AOT，不需要 Flutter Debug 的 JIT 调试器；免费 Personal Team 仍可用于此次真机安装，7 天 profile 限制不变。
+
+如果 Release 覆盖安装后仍闪退，请提供具体 iOS 版本和脱敏 crash 信息中的 Exception Type、Termination Reason、崩溃线程前几行；不再把后续崩溃自动归因于 Debug 限制。官方项目依据：[Flutter 真机 Debug 独立启动限制](https://github.com/flutter/flutter/issues/183902)、[Flutter 构建模式](https://docs.flutter.dev/testing/build-modes)，2026-10-12 查询。
