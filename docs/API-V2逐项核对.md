@@ -4,12 +4,12 @@
 
 日期：2026-10-12。按“方法＋路径”计数，包含 34 个 HTTP 操作与 1 个 WSS；在线 OpenAPI 的 33 个路径与此不矛盾，因为 GET/POST 状态接口共用路径，WSS 不列入 OpenAPI。
 
-核对中补齐了 `/voice`：文档称车机短语音，源码实际允许手机鉴权。现在可选择已有短音频、确认后 Multipart 上传；不录音，不申请麦克风权限。
+核对中补齐了 `/voice`：文档称车机短语音，源码实际允许手机鉴权。保留已有短音频入口；真实 provider readiness 信号缺失时明确不可用，不录音、不假称上传/转写成功。
 
 | # | 接口 | App 状态 | 入口 / 代码 |
 | --- | --- | --- | --- |
 | 1 | `GET /health` | 手机已接入 | 设置健康检查、前台同步；[Future<void> refresh](../lib/api/backend.dart#L332) |
-| 2 | `POST /api/v1/destinations/resolve` | 手机已接入 | 导航提交前确认；默认车机解析；[Future<void> resolve](../lib/api/pages.dart#L134) |
+| 2 | `POST /api/v1/destinations/resolve` | 手机已接入 | 纯解析后确认；目标设备显式派发；[Future<void> resolve](../lib/api/pages.dart#L134) |
 | 3 | `POST /api/v1/tasks/destination` | 手机已接入 | 单一候选确认创建任务；[Future<void> send](../lib/api/pages.dart#L261) |
 | 4 | `GET /api/v1/tasks/poll` | 车机职责，手机不调用 | 防止偷领任务、伪造状态/ACK |
 | 5 | `POST /api/v1/tasks/{task_id}/ack` | 车机职责，手机不调用 | 防止偷领任务、伪造状态/ACK |
@@ -52,10 +52,12 @@
 
 - 真实 PHONE_TOKEN 鉴权、扫码/Cookie授权、音频转写、会员曲目、缓存清理、Range seek、车机执行均未用真实凭据测试；本次没有对真实后端发送这些操作。
 - iPhone Keychain/文件选择器已编译，持久化与真实文件选择尚需真机验证。
-- 本地 car_app 未找到新播控订阅实现，实际车机版本未知；HTTP/WSS 指令被接受不等于车机已执行。
+- 车机工程师并行修订播控接入；实际车机部署与执行仍未在本轮验收。HTTP/WSS 指令被接受不等于已执行。
 - 语音只上传已有文件（10 MB 客户端上限，服务器限制仍可能更小）；不新增手机录音功能。流媒体用于车机播放和首块检查，不新增 iPhone 本地播放器。
 - 可选管理参数 `scan_dir`、`target_bytes` 保持后端默认；推荐数量固定 30、未开放 playlist_id，任务有效期请求默认 3600。没有声称所有可选参数都做了编辑器。
-- V1 resolve 源码可能提前派发，App 在 POST 前确认并查询已有任务；查询失败保留 request ID，不盲目再次发送。
+- 已更新为纯 V1 resolve → 用户确认 → 显式设备派发；用 OpenAPI 特征拦截旧版 resolver。最新证据及仍待联调项目见接入说明。
 - 无凭据健康 GET 和在线 OpenAPI 核对已实测；其他测试使用 MockClient/内存 WebSocket。具体测试、构建与配置步骤见 [接入说明](API-V2接入与验证.md)。
 
 这份核对表不代替真机与车机联调验收。
+
+2026-10-13 补充：新增手机 GET `/api/v1/music/control/command/{command_id}` 已接入，车机 POST 同路径 `/ack` 不调用；原 35 条基线之外新增 2 操作。新增 stop 与 command_status 生命周期、来源私网 URL、去重测试见 [最新报告](API-V2接入与验证.md)。

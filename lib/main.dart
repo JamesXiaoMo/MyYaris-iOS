@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'car_model.dart';
 import 'api/backend.dart';
 import 'api/pages.dart';
 import 'package:flutter/cupertino.dart';
@@ -142,8 +143,6 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                     }),
                     onDemo: (label) =>
                         _command(label == '上一曲' ? 'prev' : 'next'),
-                    onNavigate: () => setState(() => _index = 1),
-                    onMusic: () => setState(() => _index = 2),
                   ),
                   NavigationPage(session: session),
                   MusicPage(session: session),
@@ -214,12 +213,10 @@ class _HomePage extends StatelessWidget {
     required this.onPlay,
     required this.onRepeat,
     required this.onDemo,
-    required this.onNavigate,
-    required this.onMusic,
   });
   final BackendSession session;
   final bool playing, repeat;
-  final VoidCallback onPlay, onRepeat, onNavigate, onMusic;
+  final VoidCallback onPlay, onRepeat;
   final ValueChanged<String> onDemo;
 
   @override
@@ -248,46 +245,8 @@ class _HomePage extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        Text(
-          session.connection,
-          style: TextStyle(
-            fontSize: 40,
-            fontWeight: FontWeight.w700,
-            height: 1.15,
-          ),
-        ),
-        const SizedBox(height: 7),
-        Text(
-          '${session.realtime} · HTTPS 私网\n车机状态：服务器快照，需核对实际执行',
-          style: TextStyle(color: _muted, fontSize: 12, height: 1.5),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 185,
-          width: double.infinity,
-          child: Semantics(
-            label: '红色 Toyota Yaris 车辆展示',
-            child: ShaderMask(
-              blendMode: BlendMode.dstIn,
-              shaderCallback: (bounds) => const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.white,
-                  Colors.white,
-                  Colors.transparent,
-                ],
-                stops: [0, .18, .85, 1],
-              ).createShader(bounds),
-              child: Image.asset(
-                'assets/images/yaris.png',
-                fit: BoxFit.contain,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 280, child: CarModel()),
+        const SizedBox(height: 36),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -338,33 +297,6 @@ class _HomePage extends StatelessWidget {
               ],
             );
           },
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _quick('快速发送目的地', CupertinoIcons.map_pin_ellipse, onNavigate),
-            _quick('搜索点播歌曲 / 歌单', CupertinoIcons.search, onMusic),
-          ],
-        ),
-        const SizedBox(height: 14),
-        _panel(
-          child: Column(
-            children: [
-              _device(
-                'R9000P 远端后端',
-                session.connection,
-                CupertinoIcons.cloud_fill,
-              ),
-              const Divider(color: Color(0xFF242830), height: 22),
-              _device(
-                'Ottocast P3 Pro 车机',
-                session.statusReceivedAt != null ? '已收到快照' : '状态待核实',
-                CupertinoIcons.device_phone_portrait,
-              ),
-            ],
-          ),
         ),
       ],
     ),
@@ -464,22 +396,6 @@ class _HomePage extends StatelessWidget {
       ),
     );
   }
-
-  Widget _quick(String label, IconData icon, VoidCallback onTap) =>
-      OutlinedButton.icon(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          backgroundColor: const Color(0xFF202227),
-          side: const BorderSide(color: Color(0xFF32353B)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        ),
-        icon: Icon(icon, size: 16),
-        label: Text(
-          label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        ),
-      );
 }
 
 Widget _panel({required Widget child}) => Container(
@@ -515,19 +431,4 @@ Widget _badge(
       ),
     ],
   ),
-);
-
-Widget _device(String title, String status, IconData icon) => Row(
-  children: [
-    Icon(icon, size: 19, color: _muted),
-    const SizedBox(width: 9),
-    Expanded(
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-      ),
-    ),
-    const SizedBox(width: 6),
-    Text(status, style: const TextStyle(color: _muted, fontSize: 10)),
-  ],
 );

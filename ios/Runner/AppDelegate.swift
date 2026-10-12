@@ -1,3 +1,4 @@
+import WebKit
 import Flutter
 import UIKit
 import Security
@@ -15,6 +16,7 @@ import UniformTypeIdentifiers
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    engineBridge.applicationRegistrar.register(YarisModelFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/model")
     let channel = FlutterMethodChannel(name: "io.myyaris/credentials", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { call, result in
       let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -84,4 +86,92 @@ import UniformTypeIdentifiers
     }
   }
 
+}
+
+// Local assets only. No localhost server, CDN, or remote model access at runtime.
+private final class YarisAssets: NSObject, WKURLSchemeHandler {
+  func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
+    let allowed: [String: String] = [
+      "/model_viewer/index.html": "text/html", "/model_viewer/model-viewer.min.js": "text/javascript",
+      "/models/yaris.glb": "model/gltf-binary"]
+    guard let url = task.request.url, let mime = allowed[url.path],
+          let root = Bundle.main.resourceURL else { task.didFailWithError(NSError(domain: "LocalModel", code: 404)); return }
+    let file = root.appendingPathComponent("Frameworks/App.framework/flutter_assets/assets" + url.path)
+    do {
+      let data = try Data(contentsOf: file, options: .mappedIfSafe)
+      task.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: mime.hasPrefix("text/") ? "utf-8" : nil))
+      task.didReceive(data); task.didFinish()
+    } catch { task.didFailWithError(error) }
+  }
+  func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}
+}
+private final class YarisModelFactory: NSObject, FlutterPlatformViewFactory {
+  let messenger: FlutterBinaryMessenger
+  init(messenger: FlutterBinaryMessenger) { self.messenger = messenger }
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol { FlutterStandardMessageCodec.sharedInstance() }
+  func create(withFrame frame: CGRect, viewIdentifier id: Int64, arguments args: Any?) -> FlutterPlatformView {
+    YarisModelView(frame: frame, id: id, messenger: messenger, verify: (args as? [String: Any])?["verify"] as? Bool ?? false)
+  }
+}
+private final class YarisModelView: NSObject, FlutterPlatformView, WKScriptMessageHandler, WKNavigationDelegate {
+  private let web: WKWebView
+  private let channel: FlutterMethodChannel
+  private var released = false
+  private let verify: Bool
+  init(frame: CGRect, id: Int64, messenger: FlutterBinaryMessenger, verify: Bool) {
+    self.verify = verify
+    let configuration = WKWebViewConfiguration()
+    configuration.setURLSchemeHandler(YarisAssets(), forURLScheme: "yaris-asset")
+    web = WKWebView(frame: frame, configuration: configuration)
+    channel = FlutterMethodChannel(name: "io.myyaris/model/\(id)", binaryMessenger: messenger)
+    super.init()
+    configuration.userContentController.add(self, name: "model")
+    web.clipsToBounds = true; web.isOpaque = false; web.backgroundColor = .clear; web.scrollView.backgroundColor = .clear
+    web.scrollView.isScrollEnabled = false; web.isUserInteractionEnabled = false
+    web.navigationDelegate = self
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { result(nil); return }
+      if call.method == "yaw", let yaw = call.arguments as? Double, yaw.isFinite {
+        self.web.evaluateJavaScript("window.setYaw(\(yaw))", completionHandler: nil)
+      } else if call.method == "dispose" { self.release() }
+      result(nil)
+    }
+    web.load(URLRequest(url: URL(string: "yaris-asset://local/model_viewer/index.html")!))
+  }
+  func view() -> UIView { web }
+  func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    guard let state = message.body as? String, ["loaded", "failed"].contains(state), !released else { return }
+    channel.invokeMethod(state, arguments: nil)
+    if verify && state == "loaded" { captureAngles([45]) }
+  }
+  private func captureAngles(_ angles: [Int]) {
+    guard !released else { return }
+    guard let angle = angles.first else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+      guard let self = self, !self.released else { return }
+      self.web.takeSnapshot(with: nil) { image, _ in
+        guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let name = angle == 45 ? "yaris-3d-device.png" : "yaris-3d-\(angle).png"
+        try? image?.pngData()?.write(to: root.appendingPathComponent(name))
+        self.web.evaluateJavaScript("JSON.stringify({loaded:car.loaded,orbit:car.getCameraOrbit(),target:car.getCameraTarget(),fov:car.getFieldOfView(),size:{width:car.clientWidth,height:car.clientHeight}})") { value, _ in
+          if let value = value as? String {
+            try? value.write(to: root.appendingPathComponent("yaris-3d-proof.json"), atomically: true, encoding: .utf8)
+          }
+          self.captureAngles(Array(angles.dropFirst()))
+        }
+      }
+    }
+  }
+  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { channel.invokeMethod("failed", arguments: nil); release() }
+  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { channel.invokeMethod("failed", arguments: nil); release() }
+  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { channel.invokeMethod("failed", arguments: nil); release() }
+
+  private func release() {
+    guard !released else { return }; released = true
+    web.evaluateJavaScript("window.releaseModel?.()", completionHandler: nil)
+    web.stopLoading(); web.configuration.userContentController.removeScriptMessageHandler(forName: "model")
+    channel.setMethodCallHandler(nil)
+    web.loadHTMLString("", baseURL: nil)
+  }
+  deinit { web.configuration.userContentController.removeScriptMessageHandler(forName: "model") }
 }

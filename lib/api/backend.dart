@@ -1,3 +1,4 @@
+import 'contracts.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,6 +9,11 @@ import 'package:http/http.dart' as http;
 
 const defaultBackend =
     'https://myyaris.example.com';
+const verifyMode = bool.fromEnvironment('MY_YARIS_VERIFY_LOGS');
+void verifyLog(String event) {
+  if (verifyMode) debugPrint('[MyYarisVerify] $event');
+}
+
 String requestId() =>
     '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
 
@@ -32,6 +38,30 @@ class ApiFailure implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+String safeErrorCode(Map value) {
+  final code = '${value['error_code'] ?? value['code'] ?? ''}';
+  const allowed = {
+    'INVALID_ACTION',
+    'INVALID_PARAMS',
+    'FORBIDDEN',
+    'AUTH_FAILED',
+    'ASR_UNAVAILABLE',
+    'ASR_NOT_CONFIGURED',
+    'NLP_UNAVAILABLE',
+    'NLP_NOT_CONFIGURED',
+    'VOICE_PROVIDER_UNAVAILABLE',
+    'PROVIDER_UNAVAILABLE',
+    'TRACK_DECODE_ERROR',
+    'AUDIO_DECODE_ERROR',
+    'STREAM_HTTP_ERROR',
+    'TRACK_NOT_FOUND',
+    'UNSUPPORTED_SOURCE',
+    'PLAYER_NOT_READY',
+    'COMMAND_EXPIRED',
+  };
+  return allowed.contains(code) ? code : '接口错误（请核对后端脱敏日志）';
 }
 
 class BackendApi {
@@ -103,8 +133,99 @@ class BackendApi {
     }
   }
 
+  Future<void> ensureResolveOnlyContract() async {
+    final spec = await call('GET', '/openapi.json', auth: false);
+    Map<String, dynamic> schema(Map<String, dynamic> value) {
+      final ref = value[r'$ref'];
+      if (ref is String) {
+        return Map<String, dynamic>.from(
+          (spec['components'] as Map?)?['schemas']?[ref.split('/').last]
+                  as Map? ??
+              {},
+        );
+      }
+      return value;
+    }
+
+    final paths = spec['paths'] as Map? ?? {};
+    final request =
+        ((paths['/api/v1/tasks/destination'] as Map?)?['post']
+            as Map?)?['requestBody']?['content']?['application/json']?['schema'];
+    final task = request is Map
+        ? schema(Map<String, dynamic>.from(request))['properties'] as Map?
+        : null;
+    final legacy =
+        (spec['components']
+                as Map?)?['schemas']?['DestinationCreateRequest']?['properties']
+            as Map?;
+    if (legacy?.containsKey('auto_create_task') != true ||
+        task?.containsKey('target_device_id') != true) {
+      throw ApiFailure('后端尚未提供本轮两阶段契约标识；已阻止旧版提前派发，请等待后端部署');
+    }
+  }
+
+  Future<Map<String, dynamic>> resolveDestination(
+    String input,
+    String key,
+  ) async {
+    await ensureResolveOnlyContract();
+    final result = await call(
+      'POST',
+      '/api/v1/destinations/resolve',
+      body: {'raw_input': input, 'source': 'ios_share'},
+    );
+    if (result['task_id'] != null) {
+      throw ApiFailure('解析阶段意外生成任务，已停止后续派发，请核对后端契约');
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> dispatchDestination(
+    String id,
+    String candidateId,
+    String key, {
+    bool singleCandidate = false,
+  }) async {
+    final result = singleCandidate
+        ? await call(
+            'POST',
+            '/api/v1/tasks/destination',
+            body: {
+              'destination_id': id,
+              'target_device_id': deviceId,
+              'expires_in_seconds': 3600,
+            },
+          )
+        : await call(
+            'POST',
+            '/destinations/${Uri.encodeComponent(id)}/confirm',
+            body: {'candidate_id': candidateId, 'target_device_id': deviceId},
+          );
+    if (result['device_id'] != null &&
+        !MusicContract.sameDevice(result['device_id'], deviceId)) {
+      throw ApiFailure('已提交但后端返回目标设备不符，勿重复派发');
+    }
+    return result;
+  }
+
+  Future<void> ensureVoiceProvider() async {
+    final h = await call('GET', '/health', auth: false);
+    final capabilities = h['capabilities'];
+    final voice = capabilities is Map ? capabilities['voice'] : null;
+    final ready =
+        voice is Map &&
+        voice['asr_ready'] == true &&
+        voice['nlp_ready'] == true &&
+        voice['resolve_only'] == true &&
+        voice['mock'] != true;
+    if (!ready) {
+      throw ApiFailure('后端未确认真实 ASR/NLP provider 就绪，语音解析暂不可用；文字导航仍可使用');
+    }
+  }
+
   Future<Map<String, dynamic>> uploadAudio(Uint8List bytes, String name) async {
     if (!configured) throw ApiFailure('请先配置手机 Token');
+    await ensureVoiceProvider();
     if (bytes.length > 10 * 1024 * 1024) throw ApiFailure('请选择 10 MB 以内的短音频');
     final request = http.MultipartRequest('POST', endpoint('/voice'))
       ..followRedirects = false;
@@ -121,11 +242,19 @@ class BackendApi {
         await client.send(request).timeout(const Duration(seconds: 60)),
       ).timeout(const Duration(seconds: 60));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ApiFailure('音频上传返回 HTTP ${response.statusCode}');
+        throw ApiFailure(
+          response.statusCode == 501 || response.statusCode == 503
+              ? '语音能力暂不可用（HTTP ${response.statusCode}），请配置后端 ASR/NLP provider'
+              : '音频上传返回 HTTP ${response.statusCode}',
+        );
       }
-      return Map<String, dynamic>.from(
+      final data = Map<String, dynamic>.from(
         jsonDecode(utf8.decode(response.bodyBytes)) as Map,
       );
+      if (data['status'] == 'failed' || data['status'] == 'unavailable') {
+        throw ApiFailure('后端未完成语音转写/解析；${safeErrorCode(data)}');
+      }
+      return data;
     } on ApiFailure {
       rethrow;
     } catch (_) {
@@ -136,28 +265,61 @@ class BackendApi {
   Future<Map<String, dynamic>> command(
     String action, [
     Map<String, dynamic> params = const {},
+    String? commandId,
   ]) => call(
     'POST',
     '/api/v1/music/control/command',
     body: {
       'device_id': deviceId,
-      'command_id': requestId(),
+      'command_id': commandId ?? requestId(),
       'action': action,
-      'params': params,
+      'params': MusicContract.params(action, params, validateBase(baseUrl)),
     },
   );
-  String streamPath(Map<String, dynamic> track) => track['id'] != null
-      ? '/api/v1/music/netease/stream/${Uri.encodeComponent('${track['id']}')}'
-      : '/api/v1/music/stream/${Uri.encodeComponent('${track['track_id']}')}';
+  String trackSource(Map<String, dynamic> track) {
+    if (track['source'] == 'local_repo' || track['source'] == 'netease_cache') {
+      return '${track['source']}';
+    }
+    if (track['source'] == 'netease' ||
+        track['id'] != null ||
+        track['song_id'] != null) {
+      return 'netease';
+    }
+    if (track['track_id'] != null) return 'local_repo';
+    throw ApiFailure('缺少曲目来源');
+  }
+
+  int songId(Map<String, dynamic> track) {
+    final id = int.tryParse(
+      '${track['song_id'] ?? track['id'] ?? '${track['track_id'] ?? ''}'.replaceFirst('netease_', '')}',
+    );
+    if (id == null || id <= 0) throw ApiFailure('网易云歌曲 ID 无效');
+    return id;
+  }
+
+  String trackId(Map<String, dynamic> track) {
+    if (trackSource(track) == 'netease') return 'netease_${songId(track)}';
+    final id = '${track['track_id'] ?? ''}';
+    if (id.isEmpty) throw ApiFailure('缺少本地曲目 ID');
+    return id;
+  }
+
+  String streamPath(Map<String, dynamic> track) =>
+      trackSource(track) == 'netease'
+      ? '/api/v1/music/netease/stream/${songId(track)}'
+      : '/api/v1/music/stream/${Uri.encodeComponent(trackId(track))}';
   String canonicalStream(Map<String, dynamic> track) =>
       endpoint(streamPath(track)).toString();
+  Map<String, dynamic> trackParams(Map<String, dynamic> track) => {
+    'track_id': trackId(track),
+    'source': trackSource(track),
+    'stream_url': canonicalStream(track),
+    if (trackSource(track) == 'netease') 'song_id': songId(track),
+    if (track['title'] != null) 'title': track['title'],
+    if (track['artist'] != null) 'artist': track['artist'],
+  };
   Future<Map<String, dynamic>> playTrack(Map<String, dynamic> track) =>
-      command('play_track', {
-        'track_id': track['track_id'] ?? 'netease_${track['id']}',
-        'stream_url': canonicalStream(track),
-        'title': track['title'],
-        'artist': track['artist'],
-      });
+      command('play_track', trackParams(track));
   Future<Map<String, dynamic>> probeStream(Map<String, dynamic> track) async {
     if (!configured) throw ApiFailure('请先配置手机 Token');
     final request = http.Request('GET', endpoint(streamPath(track)))
@@ -213,6 +375,9 @@ class BackendSession extends ChangeNotifier {
   Timer? pollTimer, reconnectTimer, pingTimer;
   int generation = 0, failures = 0;
   bool refreshing = false;
+  Map<String, dynamic> lastCommandReceipt = {}, lastCommandState = {};
+  bool commandPending = false;
+  final issuedCommands = <String, String>{};
   final pendingCommands = <String, Completer<void>>{};
   void publish() {
     if (!disposed) notifyListeners();
@@ -229,9 +394,11 @@ class BackendSession extends ChangeNotifier {
         api.token = '${data['token']}';
         api.deviceId = '${data['device']}';
       }
+      verifyLog(api.configured ? 'CONFIG_PRESENT' : 'CONFIG_MISSING');
       if (api.configured) start();
     } catch (_) {
       connection = '未配置（凭据未载入）';
+      verifyLog('CONFIG_LOAD_UNAVAILABLE');
     }
     publish();
   }
@@ -270,6 +437,9 @@ class BackendSession extends ChangeNotifier {
     lastTask = {};
     currentTrack = {};
     knownTracks.clear();
+    issuedCommands.clear();
+    lastCommandReceipt = {};
+    lastCommandState = {};
     statusReceivedAt = null;
     health = {};
     connection = '连接中';
@@ -281,6 +451,10 @@ class BackendSession extends ChangeNotifier {
     await store.clear();
     stop();
     api.token = '';
+    knownTracks.clear();
+    issuedCommands.clear();
+    lastCommandReceipt = {};
+    lastCommandState = {};
     playback = {};
     lastTask = {};
     currentTrack = {};
@@ -296,10 +470,17 @@ class BackendSession extends ChangeNotifier {
     foreground = true;
     unawaited(refresh());
     unawaited(connect());
-    pollTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => unawaited(refresh()),
-    );
+    pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      unawaited(refresh());
+      if (!{
+        'applied',
+        'executed',
+        'failed',
+        'expired',
+      }.contains(lastCommandState['status'])) {
+        unawaited(refreshCommandState());
+      }
+    });
   }
 
   void stop() {
@@ -342,10 +523,17 @@ class BackendSession extends ChangeNotifier {
       );
       if (gen != generation || disposed) return;
       health = h;
-      playback = p;
+      if (p['device_id'] != null &&
+          !MusicContract.sameDevice(p['device_id'], api.deviceId)) {
+        throw ApiFailure('后端返回的设备不匹配，未应用快照');
+      }
+      final validated = MusicContract.statusPatch(p);
+      if (validated.isEmpty) throw ApiFailure('后端快照无有效状态，保留最后一次状态');
+      playback = {...playback, ...validated};
       connection = '后端可达';
+      verifyLog('HTTP_STATE_RECEIVED');
       statusReceivedAt = DateTime.now();
-      final track = '${p['current_track_id'] ?? ''}';
+      final track = '${playback['current_track_id'] ?? ''}';
       if (track.isEmpty) currentTrack = {};
       if (track.isNotEmpty &&
           currentTrack['track_id'] != track &&
@@ -366,11 +554,15 @@ class BackendSession extends ChangeNotifier {
         }
       }
       if (lastTask['task_id'] != null) {
-        final task = await api.call(
-          'GET',
-          '/tasks/${Uri.encodeComponent('${lastTask['task_id']}')}',
-        );
-        if (gen == generation) lastTask = task;
+        try {
+          final task = await api.call(
+            'GET',
+            '/tasks/${Uri.encodeComponent('${lastTask['task_id']}')}',
+          );
+          if (gen == generation) lastTask = task;
+        } catch (e) {
+          if (gen == generation) lastMessage = '任务状态暂未更新：$e';
+        }
       }
     } catch (e) {
       if (gen == generation) {
@@ -403,6 +595,7 @@ class BackendSession extends ChangeNotifier {
       }
       socket = ws;
       realtime = '实时已连接';
+      verifyLog('WSS_CONNECTED');
       failures = 0;
       lastPongAt = DateTime.now();
       publish();
@@ -432,29 +625,135 @@ class BackendSession extends ChangeNotifier {
   }
 
   void rememberTrack(Map<String, dynamic> track) {
-    final id = '${track['track_id'] ?? 'netease_${track['id']}'}';
+    final id = api.trackId(track);
     knownTracks[id] = {...track, 'track_id': id};
     if (knownTracks.length > 200) knownTracks.remove(knownTracks.keys.first);
+  }
+
+  void acceptCommandState(Map<String, dynamic> data) {
+    final id = '${data['command_id'] ?? ''}';
+    if (!issuedCommands.containsKey(id) &&
+        lastCommandState['command_id'] != id) {
+      return;
+    }
+    if (data['device_id'] != null &&
+        !MusicContract.sameDevice(data['device_id'], api.deviceId)) {
+      return;
+    }
+    final status = data['lifecycle_status'] ?? data['status'];
+    if (lastCommandState['command_id'] == id &&
+        {
+          'applied',
+          'executed',
+          'failed',
+          'expired',
+        }.contains(lastCommandState['status']) &&
+        status != lastCommandState['status']) {
+      return;
+    }
+    if (!{
+      'queued',
+      'sent',
+      'received',
+      'applied',
+      'executed',
+      'failed',
+      'expired',
+      'accepted',
+    }.contains(status)) {
+      return;
+    }
+    lastCommandState = {
+      'command_id': id,
+      'device_id': api.deviceId,
+      'status': status,
+      if (data['error_code'] != null) 'error_code': safeErrorCode(data),
+    };
+    if (status == 'failed') lastMessage = '车机回执失败：${safeErrorCode(data)}';
+    verifyLog('COMMAND_STATE_RECEIVED');
+    publish();
+  }
+
+  String get commandLabel => switch (lastCommandState['status']) {
+    'queued' => '指令已排队，车机结果待回报',
+    'sent' => '后端已投递，车机结果待回报',
+    'received' => '车机已接收，尚未确认执行',
+    'applied' || 'executed' => '车机回执：操作已应用（播放状态另行核对）',
+    'failed' => '车机回执：执行失败',
+    'expired' => '指令已过期，不会由手机自动重发',
+    'accepted' => '后端已接收，执行结果待回报',
+    'submitting' => '指令正在提交',
+    'unknown' => '指令结果未知，请先核对车机状态',
+    _ => '尚无指令执行回执',
+  };
+  Future<void> refreshCommandState() async {
+    final id = lastCommandState['command_id'];
+    if (id == null || !api.configured) return;
+    final gen = generation;
+    try {
+      final value = await api.call(
+        'GET',
+        '/api/v1/music/control/command/${Uri.encodeComponent('$id')}',
+      );
+      if (gen == generation && !disposed && value['command_id'] == id) {
+        acceptCommandState(value);
+      }
+    } catch (e) {
+      if (gen == generation && !disposed) {
+        lastMessage = '执行状态暂未更新：$e';
+        publish();
+      }
+    }
   }
 
   void consumeRealtime(dynamic event) {
     try {
       final m = jsonDecode(event as String) as Map;
       if (m['type'] == 'pong') lastPongAt = DateTime.now();
+      if (m['type'] == 'command_status') {
+        acceptCommandState(MusicContract.envelope(m));
+      }
       if (m['type'] == 'command_ack') {
-        final pending = pendingCommands.remove('${m['command_id']}');
-        if (m['status'] == 'ok' || m['status'] == 'dispatched') {
-          pending?.complete();
-        } else {
-          pending?.completeError(ApiFailure('实时指令未被接受'));
+        final ack = MusicContract.envelope(m);
+        if (ack['device_id'] != null &&
+            !MusicContract.sameDevice(ack['device_id'], api.deviceId)) {
+          return;
+        }
+        final pending = pendingCommands.remove('${ack['command_id']}');
+        if (pending != null) {
+          if ({
+            'ok',
+            'accepted',
+            'queued',
+            'dispatched',
+            'duplicate',
+          }.contains(ack['status'])) {
+            lastCommandReceipt = ack;
+            acceptCommandState({
+              ...ack,
+              'status': ack['lifecycle_status'] ?? 'accepted',
+            });
+            pending.complete();
+          } else {
+            pending.completeError(ApiFailure('指令确认失败或状态未知，请核对车机'));
+          }
         }
       }
+      if (m['type'] == 'error') {
+        final error = MusicContract.envelope(m);
+        pendingCommands
+            .remove('${error['command_id']}')
+            ?.completeError(ApiFailure('后端拒绝指令：${safeErrorCode(error)}'));
+      }
       if (m['type'] == 'status_snapshot' || m['type'] == 'status_update') {
-        final data = Map<String, dynamic>.from(m['data'] as Map);
-        if (data['device_id'] != null && data['device_id'] != api.deviceId) {
+        final data = MusicContract.statusPatch(MusicContract.envelope(m));
+        if (data.isEmpty) return;
+        if (data['device_id'] != null &&
+            !MusicContract.sameDevice(data['device_id'], api.deviceId)) {
           return;
         }
         playback = {...playback, ...data};
+        verifyLog('WSS_STATE_RECEIVED');
         final id = '${playback['current_track_id'] ?? ''}';
         if (id.isEmpty) {
           currentTrack = {};
@@ -497,39 +796,111 @@ class BackendSession extends ChangeNotifier {
     );
   }
 
+  Future<void> playTrack(Map<String, dynamic> track) async {
+    await sendCommand('play_track', api.trackParams(track));
+    rememberTrack(track);
+  }
+
   Future<void> sendCommand(
     String action, [
     Map<String, dynamic> params = const {},
+    String? commandId,
   ]) async {
     if (!api.configured) throw ApiFailure('请先配置手机 Token');
-    final ws = socket;
-    if (ws != null && ws.readyState == WebSocket.open) {
-      final id = requestId();
-      final pending = Completer<void>();
-      pendingCommands[id] = pending;
-      try {
-        ws.add(
-          jsonEncode({
-            'type': 'command',
-            'data': {
-              'command_id': id,
-              'device_id': api.deviceId,
-              'action': action,
-              'params': params,
-            },
-          }),
-        );
-        await pending.future.timeout(const Duration(seconds: 10));
-      } on TimeoutException {
-        throw ApiFailure('指令确认超时，结果未知；不自动通过 HTTP 重发');
-      } finally {
-        pendingCommands.remove(id);
+    if (commandPending) throw ApiFailure('正在等待上一条指令确认，请勿重复提交');
+    final validated = MusicContract.params(
+      action,
+      params,
+      BackendApi.validateBase(api.baseUrl),
+    );
+    final id = commandId ?? requestId();
+    final signature = jsonEncode({
+      'action': action,
+      'params': validated,
+      'device_id': api.deviceId,
+    });
+    if (issuedCommands.containsKey(id)) {
+      if (issuedCommands[id] != signature) {
+        throw ApiFailure('同一 command_id 不得对应不同指令');
       }
-    } else {
-      await api.command(action, params);
+      lastMessage = '该指令 ID 已提交过；未重复发送，执行结果仍以车机状态为准';
+      publish();
+      return;
     }
-    lastMessage = '指令已提交，等待车机状态回报';
+    issuedCommands[id] = signature;
+    lastCommandState = {
+      'command_id': id,
+      'device_id': api.deviceId,
+      'status': 'submitting',
+    };
+    if (issuedCommands.length > 1000) {
+      issuedCommands.remove(issuedCommands.keys.first);
+    }
+    commandPending = true;
     publish();
+    try {
+      final ws = socket;
+      if (ws != null && ws.readyState == WebSocket.open) {
+        final pending = Completer<void>();
+        pendingCommands[id] = pending;
+        try {
+          ws.add(
+            jsonEncode({
+              'type': 'command',
+              'data': {
+                'command_id': id,
+                'device_id': api.deviceId,
+                'action': action,
+                'params': validated,
+              },
+            }),
+          );
+          await pending.future.timeout(const Duration(seconds: 10));
+        } on TimeoutException {
+          throw ApiFailure('指令确认超时，结果未知；不自动通过 HTTP 重发');
+        } finally {
+          pendingCommands.remove(id);
+        }
+      } else {
+        final response = await api.command(action, validated, id);
+        if (response['command_id'] != null && response['command_id'] != id) {
+          throw ApiFailure('后端确认指令 ID 不符，执行结果未知');
+        }
+        lastCommandReceipt = response;
+        acceptCommandState({
+          ...response,
+          'command_id': id,
+          'status': response['lifecycle_status'] ?? 'accepted',
+        });
+      }
+      final duplicate =
+          lastCommandReceipt['duplicate'] == true ||
+          lastCommandReceipt['status'] == 'duplicate';
+      lastMessage = duplicate ? '后端识别到已有指令，未当作新指令；执行结果以车机状态为准' : commandLabel;
+    } catch (e) {
+      if (!{
+        'applied',
+        'executed',
+        'failed',
+        'expired',
+      }.contains(lastCommandState['status'])) {
+        lastCommandState = {...lastCommandState, 'status': 'unknown'};
+      }
+      lastMessage = e.toString();
+      rethrow;
+    } finally {
+      commandPending = false;
+      publish();
+    }
+  }
+
+  bool get playbackStale {
+    final stamp = DateTime.tryParse(
+      '${playback['updated_at'] ?? playback['last_heartbeat_at'] ?? ''}',
+    );
+    return !foreground ||
+        stamp == null ||
+        DateTime.now().toUtc().difference(stamp.toUtc()).inSeconds.abs() > 60;
   }
 
   bool get playing => playback['playback_state'] == 'playing';

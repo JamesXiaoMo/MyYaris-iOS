@@ -1,3 +1,4 @@
+import 'sync_contract_test.dart' show syncedOpenApi;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,6 +37,7 @@ void main() {
         client: MockClient((r) async {
           if (r.method == 'POST') writes.add(r.url.path);
           final data = switch (r.url.path) {
+            '/openapi.json' => syncedOpenApi(),
             '/api/v1/destinations/resolve' => {
               'destination_id': 'd1',
               'name': '目标',
@@ -86,13 +88,13 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('destination-preview')));
       await tester.pumpAndSettle();
-      expect(writes, isEmpty);
-      await tester.tap(find.text('确认'));
-      await tester.pumpAndSettle();
       expect(writes, ['/api/v1/destinations/resolve']);
       await tester.ensureVisible(find.text('候选二'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('候选二'));
+      await tester.pumpAndSettle();
+      expect(writes, ['/api/v1/destinations/resolve']);
+      await tester.tap(find.text('确认'));
       await tester.pumpAndSettle();
       expect(writes, [
         '/api/v1/destinations/resolve',

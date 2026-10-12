@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'backend.dart';
+import 'contracts.dart';
 
 const _muted = Color(0xFF9398A6);
 
@@ -125,6 +126,7 @@ class _NavigationPageState extends State<NavigationPage> {
   Map<String, dynamic>? resolved, query;
   String? error;
   bool busy = false;
+  String? resolveKey, dispatchKey, resolveInput;
   @override
   void dispose() {
     input.dispose();
@@ -140,14 +142,14 @@ class _NavigationPageState extends State<NavigationPage> {
       setState(() => error = '请先在设置中配置手机 Token');
       return;
     }
-    if (!await confirmAction(
-      context,
-      '提交目的地',
-      '后端对明确坐标或链接可能直接生成导航任务。确认将以下输入提交给车机？\n${input.text.trim()}',
-    )) {
-      return;
+    if (busy) return;
+    if (resolveInput != input.text.trim()) {
+      resolveKey = null;
+      dispatchKey = null;
+      resolveInput = input.text.trim();
     }
-    if (!mounted) return;
+    resolveKey ??= requestId();
+    dispatchKey ??= requestId();
     setState(() {
       busy = true;
       error = null;
@@ -155,34 +157,16 @@ class _NavigationPageState extends State<NavigationPage> {
       query = null;
     });
     try {
-      Map<String, dynamic> r;
-      if (widget.session.api.deviceId == 'car_p3pro') {
-        r = await widget.session.api.call(
-          'POST',
-          '/api/v1/destinations/resolve',
-          body: {'raw_input': input.text.trim(), 'source': 'ios_share'},
-        );
-      } else {
-        // V1 resolve has no target-device field and may auto-dispatch to the default car.
-        final q = await widget.session.api.call(
-          'POST',
-          '/destinations',
-          body: {
-            'input_type': 'auto',
-            'text': input.text.trim(),
-            'target_device_id': widget.session.api.deviceId,
-            'idempotency_key': requestId(),
-          },
-        );
-        r = {
-          'destination_id': q['request_id'],
-          'name': input.text.trim(),
-          'confidence': 0.5,
-        };
-      }
+      final r = await widget.session.api.resolveDestination(
+        input.text.trim(),
+        resolveKey!,
+      );
       if (!mounted) return;
-      setState(() => resolved = r);
-      await loadResolved();
+      setState(() {
+        resolved = r;
+        query = r['candidates'] is List ? r : null;
+      });
+      if (query == null) await loadResolved();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
@@ -197,6 +181,7 @@ class _NavigationPageState extends State<NavigationPage> {
       return;
     }
     try {
+      await widget.session.api.ensureVoiceProvider();
       final selected = await KeychainStore.channel
           .invokeMapMethod<String, dynamic>('pickAudio');
       if (selected == null || !mounted) return;
@@ -204,11 +189,13 @@ class _NavigationPageState extends State<NavigationPage> {
       if (!await confirmAction(
         context,
         '上传音频',
-        '将 ${selected['name']} 发往你的私网后端转写和解析目的地，可能生成导航任务。是否继续？',
+        '将 ${selected['name']} 发往你的私网后端转写和解析目的地，随后由你确认候选，不在上传时派发。是否继续？',
       )) {
         return;
       }
       if (!mounted) return;
+      resolveKey ??= requestId();
+      dispatchKey ??= requestId();
       setState(() {
         busy = true;
         error = null;
@@ -245,9 +232,16 @@ class _NavigationPageState extends State<NavigationPage> {
     if (resolved == null) return;
     final q = await widget.session.api.call(
       'GET',
-      '/destinations/${Uri.encodeComponent('${resolved!['destination_id']}')}',
+      '/destinations/${Uri.encodeComponent('${resolved!['destination_id'] ?? resolved!['request_id']}')}',
     );
-    if (mounted) setState(() => query = q);
+    if (mounted) {
+      setState(() {
+        query = q;
+        if (q['status'] == 'failed' || q['status'] == 'unavailable') {
+          error = '解析未完成/能力不可用，请核对真实 provider；不会派发';
+        }
+      });
+    }
     if (q['task_id'] != null) {
       final task = await widget.session.api.call(
         'GET',
@@ -259,28 +253,24 @@ class _NavigationPageState extends State<NavigationPage> {
   }
 
   Future<void> send([String? candidate]) async {
-    if (busy) return;
+    if (busy || candidate == null) return;
+    if (!await confirmAction(
+      context,
+      '发送确认后的目的地',
+      '将所选候选发送到 ${widget.session.api.deviceId}。任务提交不等于已开始导航。',
+    )) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => busy = true);
     try {
-      final id = resolved!['destination_id'];
-      final result = candidate == null
-          ? await widget.session.api.call(
-              'POST',
-              '/api/v1/tasks/destination',
-              body: {
-                'destination_id': id,
-                'expires_in_seconds': 3600,
-                'target_device_id': widget.session.api.deviceId,
-              },
-            )
-          : await widget.session.api.call(
-              'POST',
-              '/destinations/${Uri.encodeComponent('$id')}/confirm',
-              body: {
-                'candidate_id': candidate,
-                'target_device_id': widget.session.api.deviceId,
-              },
-            );
+      final id = '${resolved!['destination_id'] ?? resolved!['request_id']}';
+      final result = await widget.session.api.dispatchDestination(
+        id,
+        candidate,
+        dispatchKey ??= requestId(),
+        singleCandidate: ((query?['candidates'] as List?) ?? []).length == 1,
+      );
       widget.session.lastTask = result;
       widget.session.publish();
       if (mounted) {
@@ -300,11 +290,11 @@ class _NavigationPageState extends State<NavigationPage> {
   @override
   Widget build(BuildContext context) {
     final candidates = (query?['candidates'] as List?) ?? [];
-    final confidence = (resolved?['confidence'] as num?)?.toDouble() ?? 0;
+
     return ListView(
       padding: const EdgeInsets.all(22),
       children: [
-        heading('导航', '提交前确认输入，歧义地点再选择候选。'),
+        heading('导航', '先解析候选，确认后才派发到指定车机。'),
         card([
           TextField(
             key: const ValueKey('destination-input'),
@@ -321,7 +311,7 @@ class _NavigationPageState extends State<NavigationPage> {
             key: const ValueKey('destination-preview'),
             onPressed: busy || resolved != null ? null : resolve,
             icon: const Icon(Icons.place_outlined),
-            label: Text(busy ? '处理中…' : '提交目的地'),
+            label: Text(busy ? '处理中…' : '解析目的地（不派发）'),
           ),
           if (error != null)
             Padding(
@@ -350,7 +340,7 @@ class _NavigationPageState extends State<NavigationPage> {
             ),
             const SizedBox(height: 10),
             if (query?['task_id'] != null)
-              const Text('后端已生成任务，不会再次派发。请查看下方回执。')
+              const Text('已存在任务，不会再次派发；请查看回执。')
             else if (query == null)
               const Text('解析请求已提交，但未能查询派发状态。请重新查询，不要重复提交。')
             else if (candidates.isNotEmpty)
@@ -362,13 +352,7 @@ class _NavigationPageState extends State<NavigationPage> {
                     '${c['address'] ?? ''}\n${c['latitude']}, ${c['longitude']}',
                   ),
                   trailing: const Icon(Icons.send),
-                  onTap: busy
-                      ? null
-                      : () => send(
-                          candidates.length == 1
-                              ? null
-                              : '${c['candidate_id']}',
-                        ),
+                  onTap: busy ? null : () => send('${c['candidate_id']}'),
                 ),
               )
             else ...[
@@ -376,16 +360,10 @@ class _NavigationPageState extends State<NavigationPage> {
                 '${resolved!['name']}\n${resolved!['latitude']}, ${resolved!['longitude']}',
               ),
               const SizedBox(height: 12),
-              if (confidence >= .7)
-                FilledButton(
-                  onPressed: busy ? null : () => send(),
-                  child: const Text('确认并发送到车机'),
-                )
-              else
-                const Text(
-                  '未得到可靠候选，请换用完整坐标或更明确的地址。不会派发占位坐标。',
-                  style: TextStyle(color: Colors.orangeAccent),
-                ),
+              const Text(
+                '未得到可靠候选，请换用完整坐标或更明确的地址。不会派发占位坐标。',
+                style: TextStyle(color: Colors.orangeAccent),
+              ),
             ],
           ]),
         if (resolved != null)
@@ -487,7 +465,12 @@ class _MusicPageState extends State<MusicPage> {
         },
       );
       final items = ((response[online ? 'songs' : 'tracks'] as List?) ?? [])
-          .map((x) => Map<String, dynamic>.from(x as Map))
+          .map(
+            (x) => {
+              ...Map<String, dynamic>.from(x as Map),
+              'source': online ? 'netease' : source,
+            },
+          )
           .toList();
       if (mounted) {
         setState(() {
@@ -505,10 +488,7 @@ class _MusicPageState extends State<MusicPage> {
 
   Future<void> play(Map<String, dynamic> track) async {
     try {
-      await widget.session.api.playTrack(track);
-      widget.session.rememberTrack(track);
-      widget.session.lastMessage = '播放指令已提交，等待车机回报';
-      widget.session.publish();
+      await widget.session.playTrack(track);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -614,10 +594,17 @@ class _MusicPageState extends State<MusicPage> {
   );
 }
 
-class PlaybackPanel extends StatelessWidget {
+class PlaybackPanel extends StatefulWidget {
   const PlaybackPanel({super.key, required this.session});
   final BackendSession session;
-  void command(
+  @override
+  State<PlaybackPanel> createState() => _PlaybackPanelState();
+}
+
+class _PlaybackPanelState extends State<PlaybackPanel> {
+  BackendSession get session => widget.session;
+  double? seekDraft, volumeDraft;
+  Future<void> command(
     BuildContext context,
     String action, [
     Map<String, dynamic> params = const {},
@@ -650,8 +637,9 @@ class PlaybackPanel extends StatelessWidget {
       final volume = ((p['software_volume'] as num?)?.toDouble() ?? 1)
           .clamp(0, 1)
           .toDouble();
-      final mode = ['all', 'one', 'off'].contains(p['loop_mode'])
-          ? '${p['loop_mode']}'
+      final mode =
+          {'all', 'one', 'off', 'single', 'none'}.contains(p['loop_mode'])
+          ? MusicContract.loop(p['loop_mode'])
           : 'all';
       return card([
         Text(
@@ -659,7 +647,7 @@ class PlaybackPanel extends StatelessWidget {
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         Text(
-          '车机回报：${p['playback_state'] ?? '尚未收到'} · ${session.realtime}',
+          '${session.playbackStale ? '过期/尚未收到的快照' : '服务器转发的状态快照'}：${p['playback_state'] ?? '未知'} · ${session.realtime}',
           style: const TextStyle(color: _muted),
         ),
         Text(
@@ -686,6 +674,11 @@ class PlaybackPanel extends StatelessWidget {
               icon: const Icon(Icons.skip_next),
             ),
             IconButton(
+              tooltip: '停止',
+              onPressed: () => command(context, 'stop'),
+              icon: const Icon(Icons.stop),
+            ),
+            IconButton(
               tooltip: '刷新播放状态',
               onPressed: () => session.refresh(),
               icon: const Icon(Icons.refresh),
@@ -695,18 +688,27 @@ class PlaybackPanel extends StatelessWidget {
         if (duration > 0) ...[
           Text('${(position / 1000).floor()} / ${(duration / 1000).floor()} 秒'),
           Slider(
-            value: position,
+            value: (seekDraft ?? position).clamp(0, duration).toDouble(),
             max: duration,
-            onChanged: (_) {},
-            onChangeEnd: (v) =>
-                command(context, 'seek', {'seek_ms': v.round()}),
+            onChanged: session.commandPending
+                ? null
+                : (v) => setState(() => seekDraft = v),
+            onChangeEnd: (v) async {
+              await command(context, 'seek', {'seek_ms': v.round()});
+              if (mounted) setState(() => seekDraft = null);
+            },
           ),
         ],
         const Text('车机软件音量'),
         Slider(
-          value: volume,
-          onChanged: (_) {},
-          onChangeEnd: (v) => command(context, 'set_volume', {'volume': v}),
+          value: volumeDraft ?? volume,
+          onChanged: session.commandPending
+              ? null
+              : (v) => setState(() => volumeDraft = v),
+          onChangeEnd: (v) async {
+            await command(context, 'set_volume', {'volume': v});
+            if (mounted) setState(() => volumeDraft = null);
+          },
         ),
         DropdownButtonFormField<String>(
           key: ValueKey(mode),

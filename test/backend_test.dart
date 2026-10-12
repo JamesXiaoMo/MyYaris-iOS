@@ -166,6 +166,12 @@ void main() {
     () async {
       final api = BackendApi(
         client: MockClient((r) async {
+          if (r.url.path == '/health') {
+            return http.Response(
+              '{"capabilities":{"voice":{"asr_ready":true,"nlp_ready":true,"resolve_only":true,"mock":false}}}',
+              200,
+            );
+          }
           expect(r.url.path, '/voice');
           expect(r.method, 'POST');
           expect(r.headers['Authorization'], 'Bearer test-only');
