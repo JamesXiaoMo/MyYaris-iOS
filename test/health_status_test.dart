@@ -25,7 +25,7 @@ void main() {
           ); // healthy backend, unavailable car/auth snapshot
         }),
       )..token = 'fixture';
-      final session = BackendSession(api: api);
+      final session = BackendSession(requireUserLogin: false, api: api);
       addTearDown(session.dispose);
       expect(session.backendLabel, '检测中');
       await session.refresh();

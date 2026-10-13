@@ -92,13 +92,13 @@ void main() {
     },
   );
   test('task label never claims navigation has started', () {
-    final s = BackendSession();
+    final s = BackendSession(requireUserLogin: false);
     s.lastTask = {'status': 'launch_requested'};
     expect(s.taskLabel, '已请求打开 NAVITIME');
     s.dispose();
   });
   test('realtime partial state merges and ignores a different device', () {
-    final session = BackendSession();
+    final session = BackendSession(requireUserLogin: false);
     session.playback = {'software_volume': .6};
     session.consumeRealtime(
       jsonEncode({
@@ -125,7 +125,7 @@ void main() {
         return http.Response('{}', 200);
       }),
     )..token = 'test-only';
-    final session = BackendSession(api: api);
+    final session = BackendSession(requireUserLogin: false, api: api);
     session.socket = StubSocket((raw) {
       final message = jsonDecode(raw as String) as Map;
       expect(message['data']['params'], {'loop_mode': 'one'});
@@ -152,7 +152,8 @@ void main() {
           return http.Response('{}', 200);
         }),
       )..token = 'test-only';
-      final session = BackendSession(api: api)..socket = StubSocket((_) {});
+      final session = BackendSession(requireUserLogin: false, api: api)
+        ..socket = StubSocket((_) {});
       final future = session.sendCommand('next');
       final assertion = expectLater(future, throwsA(isA<ApiFailure>()));
       session.disconnected(session.generation);
@@ -194,7 +195,7 @@ void main() {
     },
   );
   test('requested song metadata does not pretend the car already switched', () {
-    final session = BackendSession();
+    final session = BackendSession(requireUserLogin: false);
     session.currentTrack = {'track_id': 'old', 'title': '旧曲'};
     session.rememberTrack({'id': 123, 'title': '请求曲目'});
     expect(session.currentTrack['title'], '旧曲');

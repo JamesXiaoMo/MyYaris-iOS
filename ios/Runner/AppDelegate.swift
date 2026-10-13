@@ -23,6 +23,27 @@ import UniformTypeIdentifiers
         kSecAttrService as String: "io.myyaris.connection",
         kSecAttrAccount as String: "phone-session"]
       switch call.method {
+      case "loadUserSession", "saveUserSession", "clearUserSession", "loadConnection", "saveConnection", "clearConnection":
+        var scoped = query
+        scoped[kSecAttrAccount as String] = call.method.hasSuffix("UserSession") ? "user-session-v1" : "connection-settings-v1"
+        if call.method.hasPrefix("load") {
+          scoped[kSecReturnData as String] = true; scoped[kSecMatchLimit as String] = kSecMatchLimitOne
+          var item: CFTypeRef?; let status = SecItemCopyMatching(scoped as CFDictionary, &item)
+          if status == errSecItemNotFound { result(nil) }
+          else if status == errSecSuccess, let data = item as? Data { result(String(data: data, encoding: .utf8)) }
+          else { result(FlutterError(code: "KEYCHAIN_READ", message: "无法安全读取会话", details: Int(status))) }
+        } else if call.method.hasPrefix("clear") {
+          let status = SecItemDelete(scoped as CFDictionary)
+          if status == errSecSuccess || status == errSecItemNotFound { result(nil) }
+          else { result(FlutterError(code: "KEYCHAIN_CLEAR", message: "无法清除本机会话", details: Int(status))) }
+        } else {
+          guard let value = call.arguments as? String, let data = value.data(using: .utf8) else { result(FlutterError(code: "INVALID_VALUE", message: "会话格式错误", details: nil)); return }
+          let updates: [String: Any] = [kSecValueData as String: data, kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+          var status = SecItemUpdate(scoped as CFDictionary, updates as CFDictionary)
+          if status == errSecItemNotFound { status = SecItemAdd(scoped.merging(updates) { _, new in new } as CFDictionary, nil) }
+          if status == errSecSuccess { result(nil) }
+          else { result(FlutterError(code: "KEYCHAIN_WRITE", message: "无法安全保存会话", details: Int(status))) }
+        }
       case "pickAudio":
         guard self.audioPickerResult == nil else { result(FlutterError(code: "PICKER_BUSY", message: "文件选择器已打开", details: nil)); return }
         guard let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
@@ -41,7 +62,7 @@ import UniformTypeIdentifiers
         if UserDefaults.standard.bool(forKey: key) { result(false) }
         else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {

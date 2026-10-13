@@ -5,6 +5,7 @@ import 'verification/home_evidence.dart';
 import 'verification/music_diagnostic.dart';
 import 'api/backend.dart';
 import 'api/pages.dart';
+import 'api/login_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,14 +22,33 @@ void main() {
   runApp(const MyYarisApp());
 }
 
-class MyYarisApp extends StatelessWidget {
+class MyYarisApp extends StatefulWidget {
   const MyYarisApp({super.key});
+  @override
+  State<MyYarisApp> createState() => _MyYarisAppState();
+}
+
+class _MyYarisAppState extends State<MyYarisApp> {
+  final session = BackendSession();
+  @override
+  void initState() {
+    super.initState();
+    unawaited(session.initialize());
+  }
+
+  @override
+  void dispose() {
+    session.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'MyYaris',
-    builder: (context, child) =>
-        RepaintBoundary(key: evidenceBoundary, child: child!),
+    builder: (context, child) => RepaintBoundary(
+      key: evidenceBoundary,
+      child: AuthenticationGate(session: session, child: child!),
+    ),
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       brightness: Brightness.dark,
@@ -43,12 +63,13 @@ class MyYarisApp extends StatelessWidget {
         behavior: SnackBarBehavior.floating,
       ),
     ),
-    home: const YarisShell(),
+    home: YarisShell(session: session, initializeSession: false),
   );
 }
 
 class YarisShell extends StatefulWidget {
-  const YarisShell({super.key, this.session});
+  const YarisShell({super.key, this.session, this.initializeSession = true});
+  final bool initializeSession;
   final BackendSession? session;
 
   @override
@@ -63,24 +84,26 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
     super.initState();
     session = widget.session ?? BackendSession();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(
-      session.initialize().then((_) async {
-        if (const bool.fromEnvironment('MY_YARIS_MUSIC_DIAGNOSTIC') &&
-            mounted) {
-          setState(() => _index = 2);
-          await diagnoseOnlineMusic(session);
-        }
-        if (const bool.fromEnvironment('MY_YARIS_HOME_VERIFY') && mounted) {
-          await verifyHomeOnDevice(session);
-        }
-        if (const bool.fromEnvironment('MY_YARIS_FAVORITES_VERIFY') &&
-            mounted) {
-          await verifyFavoritesOnDevice(session.api, context, () {
-            if (mounted) setState(() => _index = 1);
-          });
-        }
-      }),
-    );
+    if (widget.initializeSession) {
+      unawaited(
+        session.initialize().then((_) async {
+          if (const bool.fromEnvironment('MY_YARIS_MUSIC_DIAGNOSTIC') &&
+              mounted) {
+            setState(() => _index = 2);
+            await diagnoseOnlineMusic(session);
+          }
+          if (const bool.fromEnvironment('MY_YARIS_HOME_VERIFY') && mounted) {
+            await verifyHomeOnDevice(session);
+          }
+          if (const bool.fromEnvironment('MY_YARIS_FAVORITES_VERIFY') &&
+              mounted) {
+            await verifyFavoritesOnDevice(session.api, context, () {
+              if (mounted) setState(() => _index = 1);
+            });
+          }
+        }),
+      );
+    }
   }
 
   @override

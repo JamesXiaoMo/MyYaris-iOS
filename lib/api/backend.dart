@@ -1,4 +1,5 @@
 import 'contracts.dart';
+import 'user_auth.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -34,7 +35,8 @@ class KeychainStore implements CredentialStore {
 }
 
 class ApiFailure implements Exception {
-  ApiFailure(this.message);
+  ApiFailure(this.message, {this.statusCode});
+  final int? statusCode;
   final String message;
   @override
   String toString() => message;
@@ -71,6 +73,26 @@ class BackendApi {
   String baseUrl = defaultBackend;
   String token = '';
   String deviceId = 'car_p3pro';
+  bool isUserSession = false;
+  Future<void> Function()? onSessionExpired;
+  void Function(String)? onDeviceForbidden;
+  Map<String, String> get sessionHeaders => {'Authorization': 'Bearer $token'};
+  Future<void> checkAuthStatus(
+    int status,
+    String path,
+    String usedToken,
+  ) async {
+    if (!isUserSession || usedToken != token) return;
+    if (status == 401) await onSessionExpired?.call();
+    if (status == 403 &&
+        (path.contains('/music/control') ||
+            path.startsWith('/tasks') ||
+            path.startsWith('/destinations') ||
+            path.contains('/tasks/destination'))) {
+      onDeviceForbidden?.call(path);
+    }
+  }
+
   bool get configured => token.isNotEmpty;
   static Uri validateBase(String value) {
     final u = Uri.tryParse(value.trim());
@@ -95,7 +117,8 @@ class BackendApi {
     Map<String, dynamic>? body,
     bool auth = true,
   }) async {
-    if (auth && !configured) throw ApiFailure('请先在设置中配置手机 Token');
+    if (auth && !configured) throw ApiFailure('请先登录 MyYaris');
+    final usedToken = token;
     final request = http.Request(method, endpoint(path, query))
       ..followRedirects = false;
     request.headers['Accept'] = 'application/json';
@@ -108,11 +131,24 @@ class BackendApi {
       final response = await http.Response.fromStream(
         await client.send(request).timeout(const Duration(seconds: 15)),
       ).timeout(const Duration(seconds: 20));
+      if (auth) await checkAuthStatus(response.statusCode, path, usedToken);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ApiFailure(
-          response.statusCode == 401 || response.statusCode == 403
-              ? '鉴权失败（${response.statusCode}），请检查手机 Token／权限'
+          response.statusCode == 401
+              ? (path.endsWith('/auth/login') ? '用户名或密码不正确' : '登录会话已失效，请重新登录')
+              : response.statusCode == 403
+              ? (path.endsWith('/auth/register')
+                    ? '后端未开放普通注册'
+                    : '账号未获此操作或当前车机权限，请联系管理员授权')
+              : response.statusCode == 429
+              ? '请求暂时受限或账户冷却中，请稍后重试'
+              : {404, 405, 501}.contains(response.statusCode) &&
+                    path.endsWith('/auth/register')
+              ? '当前后端未开放普通注册或版本尚未支持'
+              : response.statusCode == 400 && path.endsWith('/auth/register')
+              ? '注册失败：用户名不可用或不符合后端规则'
               : '接口返回 HTTP ${response.statusCode}，请重试或核对后端',
+          statusCode: response.statusCode,
         );
       }
       if (response.body.isEmpty) return {};
@@ -228,6 +264,7 @@ class BackendApi {
     if (!configured) throw ApiFailure('请先配置手机 Token');
     await ensureVoiceProvider();
     if (bytes.length > 10 * 1024 * 1024) throw ApiFailure('请选择 10 MB 以内的短音频');
+    final usedToken = token;
     final request = http.MultipartRequest('POST', endpoint('/voice'))
       ..followRedirects = false;
     request.headers['Authorization'] = 'Bearer $token';
@@ -242,6 +279,7 @@ class BackendApi {
       final response = await http.Response.fromStream(
         await client.send(request).timeout(const Duration(seconds: 60)),
       ).timeout(const Duration(seconds: 60));
+      await checkAuthStatus(response.statusCode, '/voice', usedToken);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ApiFailure(
           response.statusCode == 501 || response.statusCode == 503
@@ -368,6 +406,7 @@ class BackendApi {
 
   Future<Map<String, dynamic>> probeStream(Map<String, dynamic> track) async {
     if (!configured) throw ApiFailure('请先配置手机 Token');
+    final usedToken = token;
     final abort = Completer<void>();
     final request = http.AbortableRequest(
       'GET',
@@ -375,7 +414,7 @@ class BackendApi {
       abortTrigger: abort.future,
     )..followRedirects = false;
     request.headers.addAll({
-      'Authorization': 'Bearer $token',
+      ...sessionHeaders,
       'Range': 'bytes=0-1023',
       'Accept': 'audio/*',
     });
@@ -383,6 +422,7 @@ class BackendApi {
       final response = await client
           .send(request)
           .timeout(const Duration(seconds: 15));
+      await checkAuthStatus(response.statusCode, streamPath(track), usedToken);
       if (response.statusCode != 200 && response.statusCode != 206) {
         throw ApiFailure('音频首段检查返回 HTTP ${response.statusCode}，未发送播放指令');
       }
@@ -451,9 +491,53 @@ class BackendApi {
 }
 
 class BackendSession extends ChangeNotifier {
-  BackendSession({BackendApi? api, CredentialStore? store})
-    : api = api ?? BackendApi(),
-      store = store ?? KeychainStore();
+  BackendSession({
+    BackendApi? api,
+    CredentialStore? store,
+    CredentialStore? authStore,
+    CredentialStore? settingsStore,
+    this.requireUserLogin = true,
+    this.webSocketConnector,
+  }) : api = api ?? BackendApi(),
+       store = store ?? KeychainStore(),
+       authStore = authStore ?? ScopedKeychainStore('UserSession'),
+       settingsStore = settingsStore ?? ScopedKeychainStore('Connection') {
+    this.api.onSessionExpired = expireSession;
+    this.api.onDeviceForbidden = (path) {
+      if (path.endsWith('/music/control/command') &&
+          lastCommandState['status'] == 'submitting') {
+        lastCommandState = {
+          ...lastCommandState,
+          'status': 'denied',
+          'error_code': 'FORBIDDEN',
+        };
+      }
+      deviceDenied = true;
+      stop();
+      lastMessage = '当前账号未授权车机 ${this.api.deviceId}，请联系管理员；登录会话仍有效';
+      publish();
+    };
+  }
+  final bool requireUserLogin;
+  final Future<WebSocket> Function(Uri, Map<String, String>)?
+  webSocketConnector;
+  final CredentialStore authStore, settingsStore;
+  bool authInitialized = false,
+      restoringSession = false,
+      authBusy = false,
+      authenticated = false,
+      deviceDenied = false;
+  Map<String, dynamic> userProfile = {};
+  String authMessage = '';
+  DateTime? sessionExpires;
+  Timer? sessionExpiryTimer;
+  bool get canControlVehicle =>
+      !requireUserLogin ||
+      authenticated &&
+          userProfile['has_device_control'] == true &&
+          !deviceDenied &&
+          !authBusy;
+  bool get userSignedIn => !requireUserLogin || authenticated;
   final BackendApi api;
   final CredentialStore store;
   Map<String, dynamic> health = {},
@@ -500,23 +584,266 @@ class BackendSession extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    if (!requireUserLogin) {
+      authInitialized = true;
+      publish();
+      return;
+    }
+    restoringSession = true;
+    publish();
     try {
-      final raw = await store.load();
-      if (disposed) return;
-      if (raw != null) {
-        final data = jsonDecode(raw) as Map;
-        BackendApi.validateBase('${data['base']}');
-        api.baseUrl = '${data['base']}';
-        api.token = '${data['token']}';
-        api.deviceId = '${data['device']}';
+      final rawSettings = await settingsStore.load();
+      final legacy = rawSettings == null ? await store.load() : null;
+      final config = rawSettings ?? legacy;
+      if (config != null) {
+        final data = jsonDecode(config) as Map;
+        api.baseUrl = BackendApi.validateBase('${data['base']}').origin;
+        api.deviceId = '${data['device'] ?? 'car_p3pro'}';
       }
-      verifyLog(api.configured ? 'CONFIG_PRESENT' : 'CONFIG_MISSING');
-      if (api.configured) start();
+      final saved = await authStore.load();
+      if (saved != null) {
+        final data = jsonDecode(saved) as Map;
+        if (BackendApi.validateBase('${data['base']}').origin != api.baseUrl) {
+          authMessage = '服务域名已改变，请重新登录';
+        } else {
+          final expiry = MusicContract.backendTimestamp(data['expires_at']);
+          if (expiry == null || !expiry.isAfter(DateTime.now().toUtc())) {
+            await expireSession();
+          } else {
+            final secret = data['session_id'];
+            if (secret is! String ||
+                secret.length < 32 ||
+                RegExp(r'\s').hasMatch(secret)) {
+              await expireSession();
+              return;
+            }
+            api.token = secret;
+            api.isUserSession = true;
+            sessionExpires = expiry;
+            await refreshUserProfile();
+            if (!expiry.isAfter(DateTime.now().toUtc())) {
+              await expireSession();
+              return;
+            }
+            authenticated = true;
+            scheduleSessionExpiry();
+          }
+        }
+      }
+      if (authenticated) start();
+    } catch (e) {
+      authenticated = false;
+      authMessage = e is ApiFailure ? e.message : '无法恢复会话，请保持手机解锁并重试';
+    } finally {
+      restoringSession = false;
+      authInitialized = true;
+      publish();
+    }
+  }
+
+  void scheduleSessionExpiry() {
+    sessionExpiryTimer?.cancel();
+    final expires = sessionExpires;
+    if (expires != null) {
+      sessionExpiryTimer = Timer(
+        expires.difference(DateTime.now().toUtc()),
+        () => unawaited(expireSession()),
+      );
+    }
+  }
+
+  Future<void> expireSession() async {
+    stop();
+    sessionExpiryTimer?.cancel();
+    api.token = '';
+    api.isUserSession = false;
+    authenticated = false;
+    userProfile = {};
+    resetAccountCaches();
+    authMessage = '登录会话已失效，请重新登录';
+    try {
+      await authStore.clear();
     } catch (_) {
-      connection = '未配置（凭据未载入）';
-      verifyLog('CONFIG_LOAD_UNAVAILABLE');
+      authMessage = '会话已失效，本机清理未完成；请保持设备解锁后重试';
     }
     publish();
+  }
+
+  void resetAccountCaches() {
+    commandPending = false;
+    preparingTrack = false;
+    deviceDenied = false;
+    playback = {};
+    lastTask = {};
+    currentTrack = {};
+    knownTracks.clear();
+    issuedCommands.clear();
+    lastCommandState = {};
+    lastCommandReceipt = {};
+    lastTrackProbe = {};
+    musicDiagnostic = {};
+    statusReceivedAt = null;
+    health = {};
+    backendOnline = null;
+  }
+
+  Future<void> refreshUserProfile({bool resetDeviceDenied = false}) async {
+    final usedToken = api.token;
+    final profile = accountProfile(await api.call('GET', '/api/v1/auth/me'));
+    if (api.token != usedToken || disposed) return;
+    userProfile = profile;
+    if (resetDeviceDenied) deviceDenied = false;
+    publish();
+  }
+
+  Future<void> saveConnection(String base, String device) async {
+    final origin = BackendApi.validateBase(base).origin;
+    if (device.trim().isEmpty) throw ApiFailure('请输入车机设备ID');
+    if (api.baseUrl != origin && authenticated) {
+      throw ApiFailure('请先退出当前账号，再更换服务域名');
+    }
+    await settingsStore.save(
+      jsonEncode({'base': origin, 'device': device.trim()}),
+    );
+    if (api.baseUrl != origin) {
+      api.token = '';
+      api.isUserSession = false;
+      authenticated = false;
+    }
+    if (api.deviceId != device.trim()) {
+      stop();
+      resetAccountCaches();
+    }
+    api.baseUrl = origin;
+    api.deviceId = device.trim();
+    deviceDenied = false;
+    if (authenticated) start();
+    publish();
+  }
+
+  Future<void> login(String base, String username, String password) async {
+    if (authBusy) return;
+    if (username.trim().isEmpty || password.isEmpty) {
+      throw ApiFailure('请输入用户名和密码');
+    }
+    final origin = BackendApi.validateBase(base).origin;
+    authBusy = true;
+    authMessage = '';
+    stop();
+    publish();
+    // Tests use the injected HTTP transport; no production credentials leave this client.
+    final transport = BackendApi(client: api.client)..baseUrl = origin;
+    UserSessionRecord? record;
+    try {
+      record = UserSessionRecord.fromLogin(
+        await transport.call(
+          'POST',
+          '/api/v1/auth/login',
+          auth: false,
+          body: {'username': username.trim(), 'password': password},
+        ),
+      );
+      await settingsStore.save(
+        jsonEncode({'base': origin, 'device': api.deviceId}),
+      );
+      await authStore.save(record.encode(origin, api.deviceId));
+      resetAccountCaches();
+      api.baseUrl = origin;
+      api.token = record.secret;
+      api.isUserSession = true;
+      userProfile = record.profile;
+      sessionExpires = record.expires;
+      authenticated = true;
+      deviceDenied = false;
+      scheduleSessionExpiry();
+    } catch (e) {
+      if (record != null) {
+        final cleanup = BackendApi(client: api.client)
+          ..baseUrl = origin
+          ..token = record.secret
+          ..isUserSession = true;
+        try {
+          await cleanup.call('POST', '/api/v1/auth/logout');
+        } catch (_) {}
+      }
+      rethrow;
+    } finally {
+      authBusy = false;
+      if (authenticated) start();
+      publish();
+    }
+  }
+
+  Future<void> register(
+    String base,
+    String username,
+    String password,
+    String nickname,
+  ) async {
+    if (!RegExp(r'^[a-zA-Z0-9_-]{3,32}$').hasMatch(username.trim()) ||
+        password.length < 8 ||
+        password.length > 128 ||
+        nickname.length > 64) {
+      throw ApiFailure('用户名须3～32位字母/数字/_/-，密码8～128位，昵称最多64字');
+    }
+    final transport = BackendApi(client: api.client)
+      ..baseUrl = BackendApi.validateBase(base).origin;
+    await transport.call(
+      'POST',
+      '/api/v1/auth/register',
+      auth: false,
+      body: {
+        'username': username.trim(),
+        'password': password,
+        if (nickname.trim().isNotEmpty) 'nickname': nickname.trim(),
+      },
+    );
+  }
+
+  Future<void> updateNickname(String nickname) async {
+    if (nickname.length > 64) throw ApiFailure('昵称最多64字');
+    userProfile = accountProfile(
+      await api.call(
+        'PATCH',
+        '/api/v1/auth/profile',
+        body: {'nickname': nickname.trim()},
+      ),
+    );
+    publish();
+  }
+
+  Future<void> logout() async {
+    if (authBusy) return;
+    authBusy = true;
+    stop();
+    sessionExpiryTimer?.cancel();
+    publish();
+    var revoked = true, localCleared = true;
+    try {
+      if (api.isUserSession && api.configured) {
+        await api.call('POST', '/api/v1/auth/logout');
+      }
+    } catch (e) {
+      revoked = e is ApiFailure && e.statusCode == 401;
+    } finally {
+      try {
+        await authStore.clear();
+      } catch (_) {
+        localCleared = false;
+      }
+      api.token = '';
+      api.isUserSession = false;
+      authenticated = false;
+      userProfile = {};
+      resetAccountCaches();
+      authBusy = false;
+      authMessage = !localCleared
+          ? '已停止本机会话，但Keychain清理失败，请保持手机解锁后重试'
+          : revoked
+          ? '已退出登录'
+          : '已退出本机；服务端注销未确认，请联网后处理';
+      publish();
+    }
   }
 
   Future<void> configure(
@@ -565,6 +892,10 @@ class BackendSession extends ChangeNotifier {
   }
 
   Future<void> clear() async {
+    if (requireUserLogin) {
+      await logout();
+      return;
+    }
     await store.clear();
     stop();
     api.token = '';
@@ -583,7 +914,25 @@ class BackendSession extends ChangeNotifier {
   }
 
   void start() {
-    if (!foreground || !api.configured || disposed) return;
+    if (requireUserLogin &&
+        sessionExpires != null &&
+        !sessionExpires!.isAfter(DateTime.now().toUtc())) {
+      unawaited(expireSession());
+      return;
+    }
+    if (!foreground ||
+        !api.configured ||
+        disposed ||
+        requireUserLogin && !authenticated) {
+      return;
+    }
+    if (!canControlVehicle) {
+      unawaited(checkHealthOnly());
+      stop();
+      lastMessage = '账号已登录，尚未授权当前车机；请联系管理员绑定';
+      publish();
+      return;
+    }
     stop();
     foreground = true;
     unawaited(refresh());
@@ -599,6 +948,17 @@ class BackendSession extends ChangeNotifier {
         unawaited(refreshCommandState());
       }
     });
+  }
+
+  Future<void> checkHealthOnly() async {
+    try {
+      final h = await api.call('GET', '/health', auth: false);
+      health = h;
+      backendOnline = {'ok', 'healthy'}.contains(h['status']);
+    } catch (_) {
+      backendOnline = false;
+    }
+    publish();
   }
 
   void stop() {
@@ -709,19 +1069,28 @@ class BackendSession extends ChangeNotifier {
   }
 
   Future<void> connect() async {
-    if (disposed || !foreground || !api.configured) return;
+    if (disposed || !foreground || !api.configured || !canControlVehicle) {
+      return;
+    }
     final gen = generation;
     try {
+      if (api.isUserSession) {
+        await refreshUserProfile();
+        if (!canControlVehicle || gen != generation) return;
+      }
       final uri = api
           .endpoint('/api/v1/ws/music', {
             'client_type': 'phone',
             'device_id': api.deviceId,
           })
           .replace(scheme: 'wss');
-      final ws = await WebSocket.connect(
-        uri.toString(),
-        headers: {'Authorization': 'Bearer ${api.token}'},
-      ).timeout(const Duration(seconds: 12));
+      final ws =
+          await (webSocketConnector?.call(uri, api.sessionHeaders) ??
+                  WebSocket.connect(
+                    uri.toString(),
+                    headers: api.sessionHeaders,
+                  ))
+              .timeout(const Duration(seconds: 12));
       if (gen != generation || !foreground || disposed) {
         await ws.close();
         return;
@@ -748,12 +1117,39 @@ class BackendSession extends ChangeNotifier {
           if (gen != generation || disposed) return;
           consumeRealtime(event);
         },
-        onDone: () => disconnected(gen),
+        onDone: () {
+          if (ws.closeCode == 4401) {
+            unawaited(expireSession());
+          } else if (ws.closeCode == 4403 || ws.closeCode == 1008) {
+            unawaited(recheckWebSocketAuth(gen));
+          } else {
+            disconnected(gen);
+          }
+        },
         onError: (_) => disconnected(gen),
         cancelOnError: true,
       );
-    } catch (_) {
-      disconnected(gen);
+    } catch (e) {
+      if (api.isUserSession &&
+          e is WebSocketException &&
+          RegExp(r'\b(401|403)\b').hasMatch(e.message)) {
+        await recheckWebSocketAuth(gen);
+      } else {
+        disconnected(gen);
+      }
+    }
+  }
+
+  Future<void> recheckWebSocketAuth(int gen) async {
+    try {
+      await refreshUserProfile();
+      if (gen != generation) return;
+      deviceDenied = true;
+      stop();
+      lastMessage = '实时通道未授权当前车机；登录仍有效，请联系管理员';
+      publish();
+    } catch (e) {
+      if (e is! ApiFailure || e.statusCode != 401) disconnected(gen);
     }
   }
 
@@ -813,6 +1209,7 @@ class BackendSession extends ChangeNotifier {
     'received' => '车机已接收，尚未确认执行',
     'applied' || 'executed' => '车机回执：操作已应用（播放状态另行核对）',
     'failed' => '车机回执：执行失败',
+    'denied' => '后端拒绝当前账号控车权限，未当作车机执行结果',
     'expired' => '指令已过期，不会由手机自动重发',
     'accepted' => '后端已接收，执行结果待回报',
     'submitting' => '指令正在提交',
@@ -951,6 +1348,7 @@ class BackendSession extends ChangeNotifier {
       await sendCommand('play_track', api.trackParams(track));
       rememberTrack(track);
     } catch (e) {
+      if (api.token != credential) rethrow;
       lastTrackProbe = {
         'status': 'failed',
         'message': e is ApiFailure ? e.message : '选歌检查失败',
@@ -958,8 +1356,10 @@ class BackendSession extends ChangeNotifier {
       lastMessage = '${lastTrackProbe['message']}';
       rethrow;
     } finally {
-      preparingTrack = false;
-      publish();
+      if (api.token == credential) {
+        preparingTrack = false;
+        publish();
+      }
     }
   }
 
@@ -968,13 +1368,17 @@ class BackendSession extends ChangeNotifier {
     Map<String, dynamic> params = const {},
     String? commandId,
   ]) async {
-    if (!api.configured) throw ApiFailure('请先配置手机 Token');
+    if (!api.configured) throw ApiFailure('请先登录 MyYaris');
+    if (!canControlVehicle) {
+      throw ApiFailure('当前账号未授权车机 ${api.deviceId}，请联系管理员');
+    }
     if (commandPending) throw ApiFailure('正在等待上一条指令确认，请勿重复提交');
     final validated = MusicContract.params(
       action,
       params,
       BackendApi.validateBase(api.baseUrl),
     );
+    final requestGeneration = generation, requestCredential = api.token;
     final id = commandId ?? requestId();
     final signature = jsonEncode({
       'action': action,
@@ -1028,6 +1432,9 @@ class BackendSession extends ChangeNotifier {
         if (response['command_id'] != null && response['command_id'] != id) {
           throw ApiFailure('后端确认指令 ID 不符，执行结果未知');
         }
+        if (requestGeneration != generation || requestCredential != api.token) {
+          throw ApiFailure('会话已改变，不接受旧指令回执');
+        }
         lastCommandReceipt = response;
         acceptCommandState({
           ...response,
@@ -1035,11 +1442,17 @@ class BackendSession extends ChangeNotifier {
           'status': response['lifecycle_status'] ?? 'accepted',
         });
       }
+      if (requestGeneration != generation || requestCredential != api.token) {
+        return;
+      }
       final duplicate =
           lastCommandReceipt['duplicate'] == true ||
           lastCommandReceipt['status'] == 'duplicate';
       lastMessage = duplicate ? '后端识别到已有指令，未当作新指令；执行结果以车机状态为准' : commandLabel;
     } catch (e) {
+      if (requestGeneration != generation || requestCredential != api.token) {
+        rethrow;
+      }
       if (!{
         'applied',
         'executed',
@@ -1051,8 +1464,10 @@ class BackendSession extends ChangeNotifier {
       lastMessage = e.toString();
       rethrow;
     } finally {
-      commandPending = false;
-      publish();
+      if (requestGeneration == generation && requestCredential == api.token) {
+        commandPending = false;
+        publish();
+      }
     }
   }
 
@@ -1084,6 +1499,7 @@ class BackendSession extends ChangeNotifier {
   @override
   void dispose() {
     disposed = true;
+    sessionExpiryTimer?.cancel();
     stop();
     api.close();
     super.dispose();

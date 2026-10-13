@@ -90,7 +90,7 @@ void main() {
     );
     expect(MusicContract.backendTimestamp('invalid'), isNull);
     final api = BackendApi()..token = 'fixture';
-    final session = BackendSession(api: api);
+    final session = BackendSession(requireUserLogin: false, api: api);
     addTearDown(session.dispose);
     final naive = DateTime.now().toUtc().toIso8601String().replaceFirst(
       'Z',
@@ -105,7 +105,7 @@ void main() {
     () async {
       final client = ProbeClient()..hold = Completer<void>();
       final api = BackendApi(client: client)..token = 'fixture';
-      final session = BackendSession(api: api);
+      final session = BackendSession(requireUserLogin: false, api: api);
       addTearDown(session.dispose);
       final pending = session.playTrack({'id': 123, 'source': 'netease'});
       api.deviceId = 'different-car';
@@ -186,7 +186,7 @@ void main() {
         if (kind == 'bad-audio') client.bytes = utf8.encode('{"not":"audio"}');
         if (kind == 'no-url') client.hasUrl = false;
         final api = BackendApi(client: client)..token = 'fixture';
-        final session = BackendSession(api: api);
+        final session = BackendSession(requireUserLogin: false, api: api);
         await expectLater(
           session.playTrack({'id': 123, 'source': 'netease'}),
           throwsA(isA<ApiFailure>()),
@@ -202,7 +202,7 @@ void main() {
     () async {
       final client = ProbeClient()..hold = Completer<void>();
       final api = BackendApi(client: client)..token = 'fixture';
-      final session = BackendSession(api: api);
+      final session = BackendSession(requireUserLogin: false, api: api);
       addTearDown(session.dispose);
       final first = session.playTrack({
         'id': 123,

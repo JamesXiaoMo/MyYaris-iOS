@@ -23,7 +23,8 @@ class MemoryCredentials implements CredentialStore {
 }
 
 class FixtureSession extends BackendSession {
-  FixtureSession({super.api}) : super(store: MemoryCredentials());
+  FixtureSession({super.api})
+    : super(store: MemoryCredentials(), requireUserLogin: false);
   @override
   void start() {}
 }

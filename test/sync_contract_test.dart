@@ -132,7 +132,7 @@ void main() {
         return http.Response('{}', 200);
       }),
     )..token = 'fake';
-    final s = BackendSession(api: api);
+    final s = BackendSession(requireUserLogin: false, api: api);
     s.playback = {'playback_state': 'paused'};
     s.socket = AckSocket((raw) {
       sends++;
@@ -173,7 +173,7 @@ void main() {
   test(
     'dual state envelope aliases, empty/invalid frame and other target cannot clear status',
     () {
-      final s = BackendSession();
+      final s = BackendSession(requireUserLogin: false);
       s.playback = {
         'playback_state': 'playing',
         'position_ms': 900,
@@ -303,7 +303,7 @@ void main() {
           ),
         ),
       )..token = 'fake';
-      final session = BackendSession(api: api);
+      final session = BackendSession(requireUserLogin: false, api: api);
       await session.sendCommand('resume', {}, 'c1');
       expect(session.commandLabel, contains('已排队'));
       session.consumeRealtime(

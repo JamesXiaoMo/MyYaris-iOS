@@ -6,6 +6,7 @@ import 'backend.dart';
 import 'contracts.dart';
 import 'favorites.dart';
 import 'favorites_page.dart';
+import 'login_page.dart';
 
 const _muted = Color(0xFF9398A6);
 
@@ -142,8 +143,12 @@ class _NavigationPageState extends State<NavigationPage> {
       setState(() => error = '请输入目的地');
       return;
     }
-    if (!widget.session.api.configured) {
-      setState(() => error = '请先在设置中配置手机 Token');
+    if (!widget.session.api.configured || !widget.session.canControlVehicle) {
+      setState(
+        () => error = widget.session.userSignedIn
+            ? '当前账号未授权车机，请联系管理员'
+            : '请先登录 MyYaris',
+      );
       return;
     }
     if (busy) return;
@@ -181,7 +186,7 @@ class _NavigationPageState extends State<NavigationPage> {
   Future<void> uploadVoice() async {
     if (busy) return;
     if (!widget.session.api.configured) {
-      setState(() => error = '请先配置手机 Token');
+      setState(() => error = '请先登录 MyYaris');
       return;
     }
     try {
@@ -528,6 +533,11 @@ class _MusicPageState extends State<MusicPage> {
       padding: const EdgeInsets.all(22),
       children: [
         heading('音乐', '搜索曲库，选择歌曲发送到车机播放。'),
+        if (!widget.session.canControlVehicle)
+          const Text(
+            '账号已登录，但未授权当前车机；请联系管理员绑定后再播放。',
+            style: TextStyle(color: Colors.orangeAccent),
+          ),
         if (widget.session.musicDiagnostic.isNotEmpty)
           card([
             Text(
@@ -981,7 +991,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final base = TextEditingController(text: widget.session.api.baseUrl),
       device = TextEditingController(text: widget.session.api.deviceId);
-  final token = TextEditingController();
   bool busy = false;
   bool editing = false;
   String message = '';
@@ -998,7 +1007,6 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     base.dispose();
     device.dispose();
-    token.dispose();
     super.dispose();
   }
 
@@ -1006,7 +1014,100 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(22),
     children: [
-      heading('设置', '连接私网后端，手机 Token 仅保存在本机 Keychain。'),
+      heading('设置', '登录会话保存在本机 Keychain，密码不持久化。'),
+      card([
+        Row(
+          children: [
+            accountAvatar(
+              widget.session.userProfile,
+              widget.session.api.baseUrl,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${widget.session.userProfile['nickname'] ?? widget.session.userProfile['username'] ?? '已登录用户'}',
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                  Text('用户名：${widget.session.userProfile['username'] ?? ''}'),
+                  Text(
+                    widget.session.canControlVehicle
+                        ? '车机权限已获授权'
+                        : '当前账号未授权车机，请联系管理员',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        TextButton(
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (context) {
+              final name = TextEditingController(
+                text: '${widget.session.userProfile['nickname'] ?? ''}',
+              );
+              return AlertDialog(
+                title: const Text('修改昵称'),
+                content: TextField(controller: name, maxLength: 64),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: () async {
+                      try {
+                        await widget.session.updateNickname(name.text);
+                        if (context.mounted) Navigator.pop(context);
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text(e.toString())));
+                        }
+                      }
+                    },
+                    child: const Text('保存'),
+                  ),
+                ],
+              );
+            },
+          ),
+          child: const Text('修改昵称'),
+        ),
+        TextButton(
+          onPressed: () async {
+            try {
+              await widget.session.refreshUserProfile(resetDeviceDenied: true);
+              widget.session.start();
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(e.toString())));
+              }
+            }
+          },
+          child: const Text('刷新个人资料/权限'),
+        ),
+        TextButton(
+          onPressed: widget.session.authBusy
+              ? null
+              : () async {
+                  if (await confirmAction(
+                    context,
+                    '退出登录',
+                    '注销本机会话，保留服务域名、旧配置和服务器收藏。',
+                  )) {
+                    await widget.session.logout();
+                  }
+                },
+          child: const Text('退出 MyYaris 登录'),
+        ),
+      ]),
       card([
         TextField(
           controller: base,
@@ -1020,17 +1121,6 @@ class _SettingsPageState extends State<SettingsPage> {
           decoration: const InputDecoration(labelText: '车机设备 ID'),
           autocorrect: false,
         ),
-        TextField(
-          controller: token,
-          obscureText: true,
-          enableSuggestions: false,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: widget.session.api.configured
-                ? '新手机 Token（留空保持当前）'
-                : '手机 Token',
-          ),
-        ),
         const SizedBox(height: 16),
         FilledButton(
           onPressed: busy
@@ -1038,24 +1128,10 @@ class _SettingsPageState extends State<SettingsPage> {
               : () async {
                   setState(() => busy = true);
                   try {
-                    await widget.session.configure(
-                      base.text,
-                      token.text.trim().isEmpty
-                          ? widget.session.api.token
-                          : token.text,
-                      device.text,
-                      tokenProvided: token.text.trim().isNotEmpty,
-                    );
-                    token.clear();
-                    if (mounted) setState(() => message = '配置已保存；正在核对连接');
+                    await widget.session.saveConnection(base.text, device.text);
+                    if (mounted) setState(() => message = '连接设置已保存');
                   } catch (e) {
-                    if (mounted) {
-                      setState(
-                        () => message = e is ApiFailure
-                            ? e.message
-                            : 'Keychain 保存失败，请保持设备解锁并重试',
-                      );
-                    }
+                    if (mounted) setState(() => message = e.toString());
                   } finally {
                     if (mounted) setState(() => busy = false);
                   }
@@ -1063,48 +1139,9 @@ class _SettingsPageState extends State<SettingsPage> {
           child: const Text('保存并连接'),
         ),
         if (message.isNotEmpty) Text(message),
-        TextButton(
-          onPressed: () async {
-            try {
-              BackendApi.validateBase(base.text);
-              final probe = BackendApi()..baseUrl = base.text;
-              try {
-                await showApiResult(
-                  context,
-                  '后端健康',
-                  () => probe.call('GET', '/health', auth: false),
-                );
-              } finally {
-                probe.close();
-              }
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text(e.toString())));
-              }
-            }
-          },
-          child: const Text('检查地址健康（不发送 Token）'),
-        ),
-        TextButton(
-          onPressed: () async {
-            if (await confirmAction(
-              context,
-              '清除手机配置',
-              '只删除本 App 的连接凭据，不注销网易云。',
-            )) {
-              try {
-                await widget.session.clear();
-                token.clear();
-                editing = false;
-                if (mounted) setState(() => message = '已清除');
-              } catch (_) {
-                if (mounted) setState(() => message = '清除失败，请重试');
-              }
-            }
-          },
-          child: const Text('清除本机连接配置'),
+        const Text(
+          '服务域名变更前请退出账号。旧固定凭据已保留，但不用于正常用户登录。',
+          style: TextStyle(color: _muted, fontSize: 12),
         ),
       ]),
       card([
