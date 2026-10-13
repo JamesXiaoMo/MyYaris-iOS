@@ -7,6 +7,7 @@ import 'contracts.dart';
 import 'favorites.dart';
 import 'favorites_page.dart';
 import 'login_page.dart';
+import 'liked_music_page.dart';
 
 const _muted = Color(0xFF9398A6);
 
@@ -591,6 +592,16 @@ class _MusicPageState extends State<MusicPage> {
           else if (searched)
             Text('共 $total 首', style: const TextStyle(color: _muted)),
         ]),
+        OutlinedButton.icon(
+          key: const ValueKey('liked-music-entry'),
+          icon: const Icon(Icons.favorite_outline),
+          label: const Text('我喜欢的音乐'),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => LikedMusicPage(session: widget.session),
+            ),
+          ),
+        ),
         PlaybackPanel(session: widget.session),
         ...tracks.map(
           (track) => card([

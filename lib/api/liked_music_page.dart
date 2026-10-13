@@ -1,0 +1,207 @@
+import 'package:flutter/material.dart';
+import 'backend.dart';
+import 'liked_music.dart';
+
+class LikedMusicPage extends StatefulWidget {
+  const LikedMusicPage({super.key, required this.session});
+  final BackendSession session;
+  @override
+  State<LikedMusicPage> createState() => _LikedMusicPageState();
+}
+
+class _LikedMusicPageState extends State<LikedMusicPage> {
+  late final model = LikedMusicController(widget.session);
+  final scroll = ScrollController();
+  bool selecting = false;
+  @override
+  void initState() {
+    super.initState();
+    model.addListener(_refreshUI);
+    scroll.addListener(() {
+      if (scroll.position.extentAfter < 180 && model.error == null) {
+        model.load();
+      }
+    });
+    model.load(refresh: true);
+  }
+
+  void _refreshUI() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    scroll.dispose();
+    model.dispose();
+    super.dispose();
+  }
+
+  Future<void> play(Map<String, dynamic> track) async {
+    if (selecting || !model.allowed) return;
+    final who = model.identity;
+    setState(() => selecting = true);
+    try {
+      await widget.session.playTrack(track);
+      if (mounted && who == model.identity) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('播放指令已提交；请回音乐页核对 commandID、执行回执与车机状态，不代表已经发声'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted && who == model.identity) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiFailure ? e.message : '选歌失败，未确认播放成功')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => selecting = false);
+    }
+  }
+
+  Widget cover(Map<String, dynamic> track) {
+    var url = Uri.tryParse('${track['cover_url'] ?? ''}');
+    // Upstream artwork may use HTTP; only upgrade recognized NetEase artwork
+    // hosts, still requiring successful TLS. Other insecure URLs use fallback.
+    if (url?.scheme == 'http' &&
+        (url!.host == 'music.126.net' || url.host.endsWith('.music.126.net'))) {
+      url = url.replace(scheme: 'https');
+    }
+    const fallback = SizedBox(
+      width: 48,
+      height: 48,
+      child: Icon(Icons.album_outlined),
+    );
+    if (url == null ||
+        url.scheme != 'https' ||
+        url.host.isEmpty ||
+        url.userInfo.isNotEmpty) {
+      return fallback;
+    }
+    // Public artwork only: never attach the private backend session to a CDN.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url.toString(),
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+        cacheWidth: 144,
+        frameBuilder: (_, child, frame, _) => frame == null ? fallback : child,
+        errorBuilder: (_, _, _) => fallback,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('我喜欢的音乐'),
+      actions: [
+        IconButton(
+          key: const ValueKey('liked-refresh'),
+          tooltip: '刷新歌单',
+          onPressed: model.busy ? null : () => model.load(refresh: true),
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    ),
+    body: SafeArea(
+      top: false,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([model, widget.session]),
+        builder: (context, _) => RefreshIndicator(
+          onRefresh: () => model.load(refresh: true),
+          child: ListView.builder(
+            key: const ValueKey('liked-list'),
+            controller: scroll,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            itemCount: model.tracks.length + 2,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '服务器 Owner 的私人网易云歌单，仅 MyYaris 管理员可查看；不是每位注册用户各自的网易云账号。',
+                      ),
+                      const SizedBox(height: 8),
+                      const Text('列出曲目不等于可完整播放；仅点击选歌后检查资源首段，VIP/地区限制可能仅可试听。'),
+                      if (model.loaded)
+                        Text('已加载 ${model.tracks.length} / ${model.total} 首'),
+                    ],
+                  ),
+                );
+              }
+              if (index == model.tracks.length + 1) {
+                return Column(
+                  children: [
+                    if (model.busy)
+                      const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator(),
+                      ),
+                    if (model.error != null) ...[
+                      Text(
+                        model.error!,
+                        key: const ValueKey('liked-error'),
+                        style: const TextStyle(color: Colors.orangeAccent),
+                      ),
+                      if (model.allowed)
+                        TextButton(
+                          onPressed: model.busy
+                              ? null
+                              : () => model.load(refresh: !model.loaded),
+                          child: const Text('重试'),
+                        ),
+                    ] else if (model.loaded && model.tracks.isEmpty)
+                      const Text('歌单读取成功，暂无喜欢的音乐')
+                    else if (model.hasMore && !model.busy)
+                      TextButton(
+                        key: const ValueKey('liked-more'),
+                        onPressed: () => model.load(),
+                        child: const Text('加载更多（30首）'),
+                      )
+                    else if (model.loaded && !model.busy)
+                      const Text('已到歌单末尾'),
+                  ],
+                );
+              }
+              final track = model.tracks[index - 1];
+              final duration = track['duration_ms'] as int;
+              final unavailable = track['playable'] == false;
+              final disabled =
+                  unavailable ||
+                  selecting ||
+                  !model.allowed ||
+                  !widget.session.canControlVehicle ||
+                  widget.session.commandPending ||
+                  widget.session.awaitingExecution ||
+                  widget.session.preparingTrack;
+              return Card(
+                child: ListTile(
+                  leading: cover(track),
+                  title: Text(track['title'] as String),
+                  subtitle: Text(
+                    '${track['artist']} · ${track['album'] ?? ''}\n${duration ~/ 60000}:${((duration ~/ 1000) % 60).toString().padLeft(2, '0')} · song_id ${track['song_id']} · netease\n${unavailable
+                        ? '不可用：版权或地区限制'
+                        : (track['fee'] as num? ?? 0) > 0
+                        ? '需账号权益；可能仅可试听，点击后检查'
+                        : '可播性待检查'}',
+                  ),
+                  isThreeLine: true,
+                  trailing: Icon(disabled ? Icons.block : Icons.play_arrow),
+                  onTap: disabled ? null : () => play(track),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+}
