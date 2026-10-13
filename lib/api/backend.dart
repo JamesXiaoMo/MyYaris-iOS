@@ -60,6 +60,7 @@ String safeErrorCode(Map value) {
     'UNSUPPORTED_SOURCE',
     'PLAYER_NOT_READY',
     'COMMAND_EXPIRED',
+    'COMMAND_EXECUTION_ERROR',
   };
   return allowed.contains(code) ? code : '接口错误（请核对后端脱敏日志）';
 }
@@ -320,36 +321,129 @@ class BackendApi {
   };
   Future<Map<String, dynamic>> playTrack(Map<String, dynamic> track) =>
       command('play_track', trackParams(track));
+  Future<Map<String, dynamic>> searchOnline(
+    String keyword, {
+    int page = 1,
+  }) async {
+    if (keyword.trim().isEmpty) throw ApiFailure('请输入网易云搜索关键词');
+    final response = await call(
+      'GET',
+      '/api/v1/music/netease/search',
+      query: {'keyword': keyword.trim(), 'page': '$page', 'limit': '20'},
+    );
+    final songs = response['songs'];
+    if (response['success'] == false ||
+        response['available'] == false ||
+        response['error_code'] != null) {
+      throw ApiFailure('网易云搜索服务不可用，请核对后端及账号/地区条件');
+    }
+    if (songs is! List || response['total'] is! num) {
+      throw ApiFailure('网易云搜索响应格式错误，不当作无结果');
+    }
+    final normalized = songs.map((item) {
+      if (item is! Map) throw ApiFailure('搜索曲目格式错误');
+      final track = Map<String, dynamic>.from(item);
+      final id = songId(track);
+      return {...track, 'id': id, 'song_id': id, 'source': 'netease'};
+    }).toList();
+    return {...response, 'songs': normalized};
+  }
+
+  Future<Map<String, dynamic>> ensureOnlinePlayable(
+    Map<String, dynamic> track,
+  ) async {
+    final id = songId(track);
+    final resource = await call(
+      'GET',
+      '/api/v1/music/netease/song_url',
+      query: {'song_id': '$id', 'level': 'exhigh'},
+    );
+    if (resource['song_id'] != id ||
+        resource['url'] is! String ||
+        (resource['url'] as String).trim().isEmpty) {
+      throw ApiFailure('该曲目未取得可播资源；可能受账号、会员、地区或上游限制。请在App设置检查网易云授权或换歌');
+    }
+    return probeStream({...track, 'source': 'netease', 'song_id': id});
+  }
+
   Future<Map<String, dynamic>> probeStream(Map<String, dynamic> track) async {
     if (!configured) throw ApiFailure('请先配置手机 Token');
-    final request = http.Request('GET', endpoint(streamPath(track)))
-      ..followRedirects = false;
+    final abort = Completer<void>();
+    final request = http.AbortableRequest(
+      'GET',
+      endpoint(streamPath(track)),
+      abortTrigger: abort.future,
+    )..followRedirects = false;
     request.headers.addAll({
       'Authorization': 'Bearer $token',
       'Range': 'bytes=0-1023',
+      'Accept': 'audio/*',
     });
     try {
       final response = await client
           .send(request)
           .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200 && response.statusCode != 206) {
-        await response.stream.drain<void>();
-        throw ApiFailure('流媒体返回 HTTP ${response.statusCode}');
+        throw ApiFailure('音频首段检查返回 HTTP ${response.statusCode}，未发送播放指令');
       }
-      final first = await response.stream.first.timeout(
+      final type = (response.headers['content-type'] ?? '')
+          .split(';')
+          .first
+          .toLowerCase()
+          .trim();
+      if (!type.startsWith('audio/') &&
+          type != 'application/octet-stream' &&
+          type != 'application/ogg') {
+        throw ApiFailure('响应不是音频 Content-Type，未发送播放指令');
+      }
+      final range = response.headers['content-range'] ?? '';
+      final match = RegExp(r'^bytes 0-([0-9]+)/([0-9]+)$').firstMatch(range);
+      if (response.statusCode == 206 &&
+          (match == null ||
+              int.parse(match[1]!) > 1023 ||
+              int.parse(match[2]!) <= int.parse(match[1]!))) {
+        throw ApiFailure('206音频范围不符合请求，未发送播放指令');
+      }
+      final sample = <int>[];
+      await for (final chunk in response.stream.timeout(
         const Duration(seconds: 15),
-      );
+      )) {
+        sample.addAll(chunk.take(1024 - sample.length));
+        if (sample.length >= 1024) break;
+      }
+      bool starts(List<int> bytes) =>
+          sample.length >= bytes.length &&
+          List.generate(
+            bytes.length,
+            (i) => sample[i] == bytes[i],
+          ).every((v) => v);
+      final audioHeader =
+          starts([73, 68, 51]) ||
+          (sample.length >= 2 && sample[0] == 255 && sample[1] & 224 == 224) ||
+          starts([79, 103, 103, 83]) ||
+          starts([102, 76, 97, 67]) ||
+          (starts([82, 73, 70, 70]) &&
+              sample.length >= 12 &&
+              ascii.decode(sample.sublist(8, 12), allowInvalid: true) ==
+                  'WAVE') ||
+          (sample.length >= 12 &&
+              ascii.decode(sample.sublist(4, 8), allowInvalid: true) == 'ftyp');
+      if (!audioHeader) throw ApiFailure('首段缺少支持的音频头，未发送播放指令');
       return {
         'http_status': response.statusCode,
-        'content_type': response.headers['content-type'],
-        'content_range': response.headers['content-range'],
-        'first_chunk_bytes': first.length,
-        'note': '仅检查首块响应，不代表车机已播放',
+        'content_type': type,
+        'content_range': range,
+        'range_supported': response.statusCode == 206,
+        'first_chunk_bytes': sample.length,
+        'audio_header_detected': true,
+        'note': '仅首段检查，不证明完整音频、版权/会员权限或车机已播放',
       };
     } on ApiFailure {
       rethrow;
     } catch (_) {
-      throw ApiFailure('流媒体检查失败或超时');
+      throw ApiFailure('音频首段检查失败或超时，未发送播放指令');
+    } finally {
+      if (!abort.isCompleted) abort.complete();
     }
   }
 
@@ -368,6 +462,19 @@ class BackendSession extends ChangeNotifier {
       currentTrack = {};
   final knownTracks = <String, Map<String, dynamic>>{};
   String connection = '未配置', realtime = '未连接', lastMessage = '';
+  bool? backendOnline;
+  bool? verificationBackendOverride;
+  bool? get displayedBackendOnline =>
+      const bool.fromEnvironment('MY_YARIS_HOME_VERIFY')
+      ? verificationBackendOverride ?? backendOnline
+      : backendOnline;
+  String get backendLabel => !api.configured
+      ? '未配置'
+      : displayedBackendOnline == true
+      ? '在线'
+      : displayedBackendOnline == false
+      ? '离线'
+      : '检测中';
   DateTime? statusReceivedAt;
   DateTime? lastPongAt;
   bool foreground = true, disposed = false;
@@ -376,7 +483,16 @@ class BackendSession extends ChangeNotifier {
   int generation = 0, failures = 0;
   bool refreshing = false;
   Map<String, dynamic> lastCommandReceipt = {}, lastCommandState = {};
-  bool commandPending = false;
+  bool commandPending = false, preparingTrack = false;
+  bool get awaitingExecution => {
+    'submitting',
+    'accepted',
+    'queued',
+    'sent',
+    'received',
+    'unknown',
+  }.contains(lastCommandState['status']);
+  Map<String, dynamic> lastTrackProbe = {}, musicDiagnostic = {};
   final issuedCommands = <String, String>{};
   final pendingCommands = <String, Completer<void>>{};
   void publish() {
@@ -442,6 +558,7 @@ class BackendSession extends ChangeNotifier {
     lastCommandState = {};
     statusReceivedAt = null;
     health = {};
+    backendOnline = null;
     connection = '连接中';
     start();
     publish();
@@ -460,6 +577,7 @@ class BackendSession extends ChangeNotifier {
     currentTrack = {};
     health = {};
     statusReceivedAt = null;
+    backendOnline = null;
     connection = '未配置';
     publish();
   }
@@ -515,7 +633,22 @@ class BackendSession extends ChangeNotifier {
     refreshing = true;
     final gen = generation;
     try {
-      final h = await api.call('GET', '/health', auth: false);
+      Map<String, dynamic> h;
+      try {
+        h = await api.call('GET', '/health', auth: false);
+        if (gen != generation || disposed) return;
+        health = h;
+        backendOnline = {'ok', 'healthy'}.contains(h['status']);
+        publish();
+        if (backendOnline != true) throw ApiFailure('后端健康检测未通过');
+      } catch (_) {
+        if (gen == generation && !disposed) {
+          backendOnline = false;
+          health = {};
+          publish();
+        }
+        rethrow;
+      }
       final p = await api.call(
         'GET',
         '/api/v1/music/control/status',
@@ -797,8 +930,37 @@ class BackendSession extends ChangeNotifier {
   }
 
   Future<void> playTrack(Map<String, dynamic> track) async {
-    await sendCommand('play_track', api.trackParams(track));
-    rememberTrack(track);
+    if (preparingTrack || commandPending || awaitingExecution) {
+      throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
+    }
+    final origin = api.baseUrl, target = api.deviceId, credential = api.token;
+    preparingTrack = true;
+    lastTrackProbe = {};
+    publish();
+    try {
+      if (api.trackSource(track) == 'netease') {
+        lastTrackProbe = await api.ensureOnlinePlayable(track);
+      }
+      if (disposed ||
+          !foreground ||
+          api.baseUrl != origin ||
+          api.deviceId != target ||
+          api.token != credential) {
+        throw ApiFailure('App已离开前台或配置已改变，未发送过期选歌指令');
+      }
+      await sendCommand('play_track', api.trackParams(track));
+      rememberTrack(track);
+    } catch (e) {
+      lastTrackProbe = {
+        'status': 'failed',
+        'message': e is ApiFailure ? e.message : '选歌检查失败',
+      };
+      lastMessage = '${lastTrackProbe['message']}';
+      rethrow;
+    } finally {
+      preparingTrack = false;
+      publish();
+    }
   }
 
   Future<void> sendCommand(
@@ -895,7 +1057,7 @@ class BackendSession extends ChangeNotifier {
   }
 
   bool get playbackStale {
-    final stamp = DateTime.tryParse(
+    final stamp = MusicContract.backendTimestamp(
       '${playback['updated_at'] ?? playback['last_heartbeat_at'] ?? ''}',
     );
     return !foreground ||
@@ -914,7 +1076,7 @@ class BackendSession extends ChangeNotifier {
     _ => '暂无导航任务',
   };
   bool get heartbeatFresh {
-    final h = DateTime.tryParse('${playback['last_heartbeat_at'] ?? ''}');
+    final h = MusicContract.backendTimestamp(playback['last_heartbeat_at']);
     return h != null &&
         DateTime.now().toUtc().difference(h.toUtc()).inSeconds.abs() < 60;
   }

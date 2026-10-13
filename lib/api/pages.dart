@@ -438,7 +438,7 @@ class _MusicPageState extends State<MusicPage> {
   final keyword = TextEditingController();
   String source = 'netease';
   int page = 1, total = 0;
-  bool busy = false;
+  bool busy = false, searched = false, selecting = false;
   String? error;
   List<Map<String, dynamic>> tracks = [];
   @override
@@ -448,26 +448,35 @@ class _MusicPageState extends State<MusicPage> {
   }
 
   Future<void> search({bool next = false}) async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
-      if (!next) page = 1;
+      if (!next) {
+        page = 1;
+        tracks = [];
+        total = 0;
+        searched = false;
+      }
     });
     try {
       final online = source == 'netease';
       if (online && keyword.text.trim().isEmpty) {
         throw ApiFailure('请输入网易云搜索关键词');
       }
-      final response = await widget.session.api.call(
-        'GET',
-        online ? '/api/v1/music/netease/search' : '/api/v1/music/tracks',
-        query: {
-          if (keyword.text.trim().isNotEmpty) 'keyword': keyword.text.trim(),
-          'page': '$page',
-          'limit': '20',
-          if (!online) 'source': source,
-        },
-      );
+      final response = online
+          ? await widget.session.api.searchOnline(keyword.text, page: page)
+          : await widget.session.api.call(
+              'GET',
+              '/api/v1/music/tracks',
+              query: {
+                if (keyword.text.trim().isNotEmpty)
+                  'keyword': keyword.text.trim(),
+                'page': '$page',
+                'limit': '20',
+                if (!online) 'source': source,
+              },
+            );
       final items = ((response[online ? 'songs' : 'tracks'] as List?) ?? [])
           .map(
             (x) => {
@@ -480,6 +489,7 @@ class _MusicPageState extends State<MusicPage> {
         setState(() {
           tracks = next ? [...tracks, ...items] : items;
           total = (response['total'] as num?)?.toInt() ?? tracks.length;
+          searched = true;
         });
       }
     } catch (e) {
@@ -491,6 +501,8 @@ class _MusicPageState extends State<MusicPage> {
   }
 
   Future<void> play(Map<String, dynamic> track) async {
+    if (selecting) return;
+    setState(() => selecting = true);
     try {
       await widget.session.playTrack(track);
       if (mounted) {
@@ -504,97 +516,128 @@ class _MusicPageState extends State<MusicPage> {
           context,
         ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
+    } finally {
+      if (mounted) setState(() => selecting = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(22),
-    children: [
-      heading('音乐', '搜索曲库，选择歌曲发送到车机播放。'),
-      PlaybackPanel(session: widget.session),
-      card([
-        DropdownButtonFormField<String>(
-          initialValue: source,
-          items: const [
-            DropdownMenuItem(value: 'netease', child: Text('网易云在线')),
-            DropdownMenuItem(value: 'local_repo', child: Text('本地曲库')),
-            DropdownMenuItem(value: 'netease_cache', child: Text('网易云缓存')),
-          ],
-          onChanged: busy
-              ? null
-              : (v) => setState(() {
-                  source = v!;
-                  tracks = [];
-                  total = 0;
-                }),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          key: const ValueKey('music-input'),
-          controller: keyword,
-          decoration: const InputDecoration(
-            labelText: '歌曲 / 艺术家 / 专辑',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (_) => search(),
-        ),
-        const SizedBox(height: 12),
-        FilledButton(
-          key: const ValueKey('music-preview'),
-          onPressed: busy ? null : () => search(),
-          child: Text(busy ? '搜索中…' : '搜索曲库'),
-        ),
-        if (error != null)
-          Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
-        Text('共 $total 首', style: const TextStyle(color: _muted)),
-      ]),
-      ...tracks.map(
-        (track) => card([
-          Text(
-            '${track['title'] ?? track['track_id']}',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          Text(
-            '${track['artist'] ?? ''} · ${track['album'] ?? ''}',
-            style: const TextStyle(color: _muted),
-          ),
-          Wrap(
-            spacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: () => play(track),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('车机播放'),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.session,
+    builder: (context, _) => ListView(
+      padding: const EdgeInsets.all(22),
+      children: [
+        heading('音乐', '搜索曲库，选择歌曲发送到车机播放。'),
+        if (widget.session.musicDiagnostic.isNotEmpty)
+          card([
+            Text(
+              '只读诊断：${widget.session.musicDiagnostic['search']} · 搜索数量 ${widget.session.musicDiagnostic['total'] ?? '未知'}',
+            ),
+            if (widget.session.musicDiagnostic['error'] != null)
+              Text(
+                '${widget.session.musicDiagnostic['error']}',
+                style: const TextStyle(color: Colors.orangeAccent),
               ),
-              TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => TrackPage(
-                      session: widget.session,
-                      track: track,
-                      onPlay: play,
+            const Text('未发送播放/音量/导航指令，实际起播尚未验收'),
+          ]),
+        card([
+          DropdownButtonFormField<String>(
+            initialValue: source,
+            items: const [
+              DropdownMenuItem(value: 'netease', child: Text('网易云在线')),
+              DropdownMenuItem(value: 'local_repo', child: Text('本地曲库')),
+              DropdownMenuItem(value: 'netease_cache', child: Text('网易云缓存')),
+            ],
+            onChanged: busy
+                ? null
+                : (v) => setState(() {
+                    source = v!;
+                    tracks = [];
+                    total = 0;
+                  }),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('music-input'),
+            controller: keyword,
+            decoration: const InputDecoration(
+              labelText: '歌曲 / 艺术家 / 专辑',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (_) => search(),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const ValueKey('music-preview'),
+            onPressed: busy ? null : () => search(),
+            child: Text(busy ? '搜索中…' : '搜索曲库'),
+          ),
+          if (error != null)
+            Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
+          if (error != null)
+            const Text('搜索失败，未将错误当作空结果')
+          else if (searched && tracks.isEmpty)
+            const Text('搜索返回成功，暂无结果；旧后端若吞掉上游错误，需后端诊断确认')
+          else if (searched)
+            Text('共 $total 首', style: const TextStyle(color: _muted)),
+        ]),
+        PlaybackPanel(session: widget.session),
+        ...tracks.map(
+          (track) => card([
+            Text(
+              '${track['title'] ?? track['track_id']}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              '${track['artist'] ?? ''} · ${track['album'] ?? ''}',
+              style: const TextStyle(color: _muted),
+            ),
+            Text(
+              '来源：${track['source']} · song_id：${track['song_id'] ?? track['id'] ?? '非在线曲目'} · 可播性待检查',
+              style: const TextStyle(color: _muted, fontSize: 12),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed:
+                      selecting ||
+                          widget.session.commandPending ||
+                          widget.session.awaitingExecution
+                      ? null
+                      : () => play(track),
+                  icon: const Icon(Icons.play_arrow),
+                  label: Text(selecting ? '检查可播性…' : '检查并车机播放'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => TrackPage(
+                        session: widget.session,
+                        track: track,
+                        onPlay: play,
+                      ),
                     ),
                   ),
+                  child: const Text('详情 / 歌词'),
                 ),
-                child: const Text('详情 / 歌词'),
-              ),
-            ],
-          ),
-        ]),
-      ),
-      if (tracks.length < total)
-        TextButton(
-          onPressed: busy
-              ? null
-              : () {
-                  page++;
-                  search(next: true);
-                },
-          child: const Text('加载下一页'),
+              ],
+            ),
+          ]),
         ),
-    ],
+        if (tracks.length < total)
+          TextButton(
+            onPressed: busy
+                ? null
+                : () {
+                    page++;
+                    search(next: true);
+                  },
+            child: const Text('加载下一页'),
+          ),
+      ],
+    ),
   );
 }
 
@@ -634,17 +677,33 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
     animation: session,
     builder: (context, _) {
       final p = session.playback;
+      final ready =
+          !session.playbackStale &&
+          session.heartbeatFresh &&
+          p['current_track_id'] is String &&
+          (p['current_track_id'] as String).isNotEmpty;
+      final locked =
+          session.commandPending ||
+          session.preparingTrack ||
+          session.awaitingExecution;
       final duration = (p['duration_ms'] as num?)?.toDouble() ?? 0;
+      final seekKnown = ready && p['position_ms'] is num && duration > 0;
       final position = ((p['position_ms'] as num?)?.toDouble() ?? 0)
           .clamp(0, duration > 0 ? duration : 1)
           .toDouble();
-      final volume = ((p['software_volume'] as num?)?.toDouble() ?? 1)
-          .clamp(0, 1)
-          .toDouble();
+      final rawVolume = p['software_volume'];
+      final volume =
+          rawVolume is num &&
+              rawVolume.isFinite &&
+              rawVolume >= 0 &&
+              rawVolume <= 1
+          ? rawVolume.toDouble()
+          : null;
       final mode =
-          {'all', 'one', 'off', 'single', 'none'}.contains(p['loop_mode'])
+          ready &&
+              {'all', 'one', 'off', 'single', 'none'}.contains(p['loop_mode'])
           ? MusicContract.loop(p['loop_mode'])
-          : 'all';
+          : null;
       return card([
         Text(
           '${session.currentTrack['title'] ?? p['current_track_id'] ?? '暂无播放曲目'}',
@@ -655,6 +714,10 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
           style: const TextStyle(color: _muted),
         ),
         Text(
+          '车机心跳：${p['last_heartbeat_at'] ?? '未知'} · 60秒内心跳才启用播控',
+          style: const TextStyle(color: _muted, fontSize: 12),
+        ),
+        Text(
           '快照时间（后端提供）：${p['updated_at'] ?? '未知'}',
           style: const TextStyle(color: _muted, fontSize: 12),
         ),
@@ -663,23 +726,31 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
           children: [
             IconButton(
               tooltip: '上一曲',
-              onPressed: () => command(context, 'prev'),
+              onPressed: !ready || locked
+                  ? null
+                  : () => command(context, 'prev'),
               icon: const Icon(Icons.skip_previous),
             ),
             IconButton(
               tooltip: '播放/暂停',
-              onPressed: () =>
-                  command(context, session.playing ? 'pause' : 'resume'),
+              onPressed: !ready || locked
+                  ? null
+                  : () =>
+                        command(context, session.playing ? 'pause' : 'resume'),
               icon: Icon(session.playing ? Icons.pause : Icons.play_arrow),
             ),
             IconButton(
               tooltip: '下一曲',
-              onPressed: () => command(context, 'next'),
+              onPressed: !ready || locked
+                  ? null
+                  : () => command(context, 'next'),
               icon: const Icon(Icons.skip_next),
             ),
             IconButton(
               tooltip: '停止',
-              onPressed: () => command(context, 'stop'),
+              onPressed: !ready || locked
+                  ? null
+                  : () => command(context, 'stop'),
               icon: const Icon(Icons.stop),
             ),
             IconButton(
@@ -689,47 +760,77 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             ),
           ],
         ),
-        if (duration > 0) ...[
+        if (seekKnown) ...[
           Text('${(position / 1000).floor()} / ${(duration / 1000).floor()} 秒'),
           Slider(
             value: (seekDraft ?? position).clamp(0, duration).toDouble(),
             max: duration,
-            onChanged: session.commandPending
-                ? null
-                : (v) => setState(() => seekDraft = v),
+            onChanged: locked ? null : (v) => setState(() => seekDraft = v),
             onChangeEnd: (v) async {
               await command(context, 'seek', {'seek_ms': v.round()});
               if (mounted) setState(() => seekDraft = null);
             },
           ),
-        ],
+        ] else
+          const Text('进度：未知/不可用，等待车机有效状态'),
         const Text('车机软件音量'),
-        Slider(
-          value: volumeDraft ?? volume,
-          onChanged: session.commandPending
-              ? null
-              : (v) => setState(() => volumeDraft = v),
-          onChangeEnd: (v) async {
-            await command(context, 'set_volume', {'volume': v});
-            if (mounted) setState(() => volumeDraft = null);
-          },
-        ),
+        if (ready && volume != null)
+          Slider(
+            value: volumeDraft ?? volume,
+            onChanged: locked ? null : (v) => setState(() => volumeDraft = v),
+            onChangeEnd: (v) async {
+              await command(context, 'set_volume', {'volume': v});
+              if (mounted) setState(() => volumeDraft = null);
+            },
+          )
+        else
+          const Text('音量：未知/不可用，未采用默认值'),
         DropdownButtonFormField<String>(
-          key: ValueKey(mode),
+          key: ValueKey(
+            '${mode}_${session.lastCommandState['command_id']}_${session.lastCommandState['status']}_${session.commandPending}',
+          ),
           initialValue: mode,
           decoration: const InputDecoration(labelText: '循环模式'),
+          hint: const Text('未知/不可用'),
           items: const [
             DropdownMenuItem(value: 'all', child: Text('列表循环')),
             DropdownMenuItem(value: 'one', child: Text('单曲循环')),
             DropdownMenuItem(value: 'off', child: Text('不循环')),
           ],
-          onChanged: (v) => command(context, 'set_loop', {'loop_mode': v}),
+          onChanged: !ready || mode == null || locked
+              ? null
+              : (v) async {
+                  await command(context, 'set_loop', {'loop_mode': v});
+                  if (mounted) setState(() {});
+                },
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('随机播放'),
-          value: p['shuffle_enabled'] == true,
-          onChanged: (v) => command(context, 'set_shuffle', {'shuffle': v}),
+        if (ready && p['shuffle_enabled'] is bool)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('随机播放'),
+            value: p['shuffle_enabled'] == true,
+            onChanged: !ready || p['shuffle_enabled'] is! bool || locked
+                ? null
+                : (v) => command(context, 'set_shuffle', {'shuffle': v}),
+          )
+        else
+          const Text('随机播放：未知/不可用'),
+        Text(
+          '目标：${session.api.deviceId} · command_id：${session.lastCommandState['command_id'] ?? '无'}',
+        ),
+        Text(session.commandLabel),
+        if (session.preparingTrack) const Text('正在检查资源与音频首段，尚未发出播放指令'),
+        if (session.lastTrackProbe.isNotEmpty)
+          Text(
+            session.lastTrackProbe['status'] == 'failed'
+                ? '选歌检查失败：${session.lastTrackProbe['message']}'
+                : '首段检查：HTTP ${session.lastTrackProbe['http_status']} · ${session.lastTrackProbe['content_type']} · Range ${session.lastTrackProbe['range_supported']}（不等于完整权限或已播放）',
+          ),
+        if (session.lastCommandState['error_code'] != null)
+          Text('车机错误：${session.lastCommandState['error_code']}'),
+        TextButton(
+          onPressed: session.refreshCommandState,
+          child: const Text('查询指令执行结果'),
         ),
         const Text(
           '控件以车机回报为准；HTTP / WebSocket 已送达不等于执行成功。',

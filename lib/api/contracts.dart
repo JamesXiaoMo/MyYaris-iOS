@@ -77,6 +77,29 @@ class MusicContract {
     }
   }
 
+  /// Backend UTC timestamps may lose timezone in SQLite serialization.
+  static DateTime? backendTimestamp(Object? raw) {
+    if (raw is! String) return null;
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    if (RegExp(
+      r'(Z|[+-][0-9]{2}:?[0-9]{2})$',
+      caseSensitive: false,
+    ).hasMatch(raw)) {
+      return parsed.toUtc();
+    }
+    return DateTime.utc(
+      parsed.year,
+      parsed.month,
+      parsed.day,
+      parsed.hour,
+      parsed.minute,
+      parsed.second,
+      parsed.millisecond,
+      parsed.microsecond,
+    );
+  }
+
   static Map<String, dynamic> statusPatch(Map raw) {
     final result = <String, dynamic>{};
     if (raw['device_id'] is String) result['device_id'] = raw['device_id'];
@@ -113,9 +136,8 @@ class MusicContract {
     if (shuffle is bool) result['shuffle_enabled'] = shuffle;
     for (final field in ['last_heartbeat_at', 'updated_at']) {
       final value = raw[field];
-      if (value is String && DateTime.tryParse(value) != null) {
-        result[field] = value;
-      }
+      final timestamp = backendTimestamp(value);
+      if (timestamp != null) result[field] = timestamp.toIso8601String();
     }
     if (result.keys.every(
       (key) => {'device_id', 'last_heartbeat_at', 'updated_at'}.contains(key),

@@ -35,9 +35,21 @@ import UniformTypeIdentifiers
         picker.allowsMultipleSelection = false
         self.audioPickerResult = result
         presenter.present(picker, animated: true)
+      case "captureHome":
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png"].contains(name),
+              let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              let window = scene.windows.first(where: { $0.isKeyWindow }),
+              let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+          result(FlutterError(code: "NO_WINDOW", message: "无法获取App画面", details: nil)); return
+        }
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+          window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        do { try image.pngData()?.write(to: root.appendingPathComponent(name)); result(nil) }
+        catch { result(FlutterError(code: "SCREENSHOT_WRITE", message: "App截图保存失败", details: nil)) }
       case "saveEvidence":
         guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
-              ["driving-device.png", "favorites-device.png", "favorites-proof.json"].contains(name),
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json"].contains(name),
               let bytes = payload["bytes"] as? FlutterStandardTypedData,
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
           result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return
@@ -151,7 +163,23 @@ private final class YarisModelView: NSObject, FlutterPlatformView, WKScriptMessa
   func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
     guard let state = message.body as? String, ["loaded", "failed"].contains(state), !released else { return }
     channel.invokeMethod(state, arguments: nil)
-    if verify && state == "loaded" { captureAngles([45]) }
+    if verify && state == "loaded" {
+      captureAngles([45])
+      web.callAsyncJavaScript("""
+        const initial = car.getCameraOrbit();
+        window.setYaw(135); await car.updateComplete; car.jumpCameraToGoal();
+        const rotated = car.getCameraOrbit();
+        car.cameraOrbit = '135deg 20deg 0.2m'; await car.updateComplete; car.jumpCameraToGoal();
+        const clamped = car.getCameraOrbit();
+        window.setYaw(initial.theta * 180 / Math.PI); await car.updateComplete; car.jumpCameraToGoal();
+        return {yaw_changed:Math.abs(rotated.theta-initial.theta)>0.1, phi:clamped.phi, radius:clamped.radius, target:car.getCameraTarget(), fov:car.getFieldOfView()};
+        """, arguments: [:], in: nil, in: .page) { result in
+          guard case let .success(value) = result, JSONSerialization.isValidJSONObject(value),
+                let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+                let data = try? JSONSerialization.data(withJSONObject: value) else { return }
+          try? data.write(to: root.appendingPathComponent("yaris-camera-constraints.json"))
+      }
+    }
   }
   private func captureAngles(_ angles: [Int]) {
     guard !released else { return }

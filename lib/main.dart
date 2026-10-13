@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'car_model.dart';
 import 'verification/favorites_evidence.dart';
+import 'verification/home_evidence.dart';
+import 'verification/music_diagnostic.dart';
 import 'api/backend.dart';
 import 'api/pages.dart';
 import 'package:flutter/cupertino.dart';
@@ -63,6 +65,14 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     unawaited(
       session.initialize().then((_) async {
+        if (const bool.fromEnvironment('MY_YARIS_MUSIC_DIAGNOSTIC') &&
+            mounted) {
+          setState(() => _index = 2);
+          await diagnoseOnlineMusic(session);
+        }
+        if (const bool.fromEnvironment('MY_YARIS_HOME_VERIFY') && mounted) {
+          await verifyHomeOnDevice(session);
+        }
         if (const bool.fromEnvironment('MY_YARIS_FAVORITES_VERIFY') &&
             mounted) {
           await verifyFavoritesOnDevice(session.api, context, () {
@@ -249,8 +259,10 @@ class _HomePage extends StatelessWidget {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
             _badge(
-              session.api.configured ? session.connection : '未配置后端',
-              const Color(0xFF48D882),
+              '后端 · ${session.backendLabel}',
+              session.displayedBackendOnline == true
+                  ? const Color(0xFF48D882)
+                  : _muted,
               icon: Icons.circle,
               iconSize: 8,
             ),
