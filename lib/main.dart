@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'car_model.dart';
+import 'glass_tab_bar.dart';
 import 'verification/favorites_evidence.dart';
 import 'verification/home_evidence.dart';
 import 'verification/music_diagnostic.dart';
@@ -197,54 +198,14 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
             ),
           ],
         ),
-        bottomNavigationBar: DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Color(0xFF0D1017),
-            border: Border(top: BorderSide(color: Color(0xFF20232A))),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Row(
-              children: [
-                _tab(0, '首页', CupertinoIcons.house_fill),
-                _tab(1, '行驶', CupertinoIcons.location_north_fill),
-                _tab(2, '音乐', CupertinoIcons.music_note),
-                _tab(3, '设置', CupertinoIcons.gear_solid),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
-
-  Widget _tab(int index, String label, IconData icon) => Expanded(
-    child: Semantics(
-      selected: _index == index,
-      child: InkWell(
-        key: ValueKey('tab-$index'),
-        onTap: () => setState(() => _index = index),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 24,
-                color: _index == index ? Colors.white : _muted,
+        // Scaffold reserves this whole region: content/3D never sit under it.
+        // Hide consistently while typing; the body's keyboard inset stays active.
+        bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+            ? const SizedBox.shrink()
+            : GlassTabBar(
+                index: _index,
+                onChanged: (index) => setState(() => _index = index),
               ),
-              const SizedBox(height: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _index == index ? Colors.white : _muted,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     ),
   );
