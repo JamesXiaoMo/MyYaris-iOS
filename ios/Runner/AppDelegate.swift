@@ -35,8 +35,13 @@ import UniformTypeIdentifiers
         picker.allowsMultipleSelection = false
         self.audioPickerResult = result
         presenter.present(picker, animated: true)
+      case "claimStage1Run":
+        guard let nonce = call.arguments as? String, nonce.count < 100, nonce.range(of: "^[A-Za-z0-9_]+$", options: .regularExpression) != nil else { result(false); return }
+        let key = "io.myyaris.acceptance." + nonce
+        if UserDefaults.standard.bool(forKey: key) { result(false) }
+        else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -49,7 +54,7 @@ import UniformTypeIdentifiers
         catch { result(FlutterError(code: "SCREENSHOT_WRITE", message: "App截图保存失败", details: nil)) }
       case "saveEvidence":
         guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
-              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json"].contains(name),
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json"].contains(name),
               let bytes = payload["bytes"] as? FlutterStandardTypedData,
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
           result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return
