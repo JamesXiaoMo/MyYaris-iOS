@@ -8,7 +8,7 @@
 ![iOS](https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white)
 ![Private](https://img.shields.io/badge/用途-个人自用-blue)
 
-[项目总览](https://github.com/JamesXiaoMo/MyYaris) · [后端服务](https://github.com/JamesXiaoMo/MyYaris-Backend)
+独立维护的 Flutter iOS 客户端；后端服务需自行配置。
 
 </div>
 
@@ -54,8 +54,22 @@ open ios/Runner.xcworkspace
 
 ## 文档
 
-构建、真机安装与功能验证记录见 [docs/](docs/)。共享接口契约见 [主仓库文档](https://github.com/JamesXiaoMo/MyYaris/tree/main/docs)，当前后端接口见 [API 参考](https://github.com/JamesXiaoMo/MyYaris-Backend/blob/main/docs/API参考.md)。
+构建、真机安装与功能验证记录见 [docs/](docs/)。共享接口契约由对应后端工程维护。
 
 ## 仓库维护
 
 本仓库独立于车机和后端维护。完成改动、检查并提交后推送至 GitHub；不提交凭据、个人签名材料、运行数据或构建产物。第三方模型与组件按各自权利条款使用。
+
+## 私有运行配置与公开边界
+
+源码不内置真实后端地址。新安装可在登录页或设置中输入自己的HTTPS后端地址；已有设备继续读取原Keychain连接配置与会话，不因代码脱敏而删除或重置。
+
+可选开发默认值通过编译参数传入（以下仅为不可用示例，必须替换为自己的有效HTTPS服务）：
+
+```bash
+flutter run --dart-define=MY_YARIS_BACKEND=https://backend.example.invalid
+```
+
+已保存的连接配置优先于该默认值；不要提交含真实地址的编译参数文件、生成配置、设备导出、签名材料或截图。公开工程模板不包含开发团队，使用者需在Xcode选择自己的Team与唯一Bundle ID；现有本地签名配置保留在工作区。
+
+真实App截图与验收JSON只保存于被忽略的 `private/` 或 `build/`，不随仓库发布。迁移说明见[隐私清理与公开准备](docs/隐私清理与公开准备.md)。历史清理与是否公开由维护者独立确认，本轮改动不代表历史已脱敏。

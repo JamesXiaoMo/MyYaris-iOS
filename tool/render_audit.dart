@@ -16,17 +16,15 @@ Future<void> main() async {
     errors.add(details.exceptionAsString());
     stderr.writeln(details.exceptionAsString());
   };
-  final font = FontLoader('.SF Pro Text');
-  font.addFont(
-    Future.value(
-      ByteData.sublistView(
-        await File(
-          '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-        ).readAsBytes(),
-      ),
-    ),
-  );
-  await font.load();
+  const fontPath = String.fromEnvironment('AUDIT_FONT_PATH');
+  if (fontPath.isNotEmpty) {
+    final font = FontLoader('.SF Pro Text');
+    font.addFont(
+      Future.value(ByteData.sublistView(await File(fontPath).readAsBytes())),
+    );
+    await font.load();
+  }
+  await Directory('private/evidence/render-audit').create(recursive: true);
   final controller = LiveWidgetController(binding);
   final boundaryKey = GlobalKey();
   for (final size in [
@@ -75,7 +73,7 @@ Future<void> main() async {
       final image = await render.toImage(pixelRatio: 2);
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       await File(
-        'docs/assets/$name.png',
+        'private/evidence/render-audit/$name.png',
       ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     }

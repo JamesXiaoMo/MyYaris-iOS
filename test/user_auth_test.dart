@@ -9,6 +9,8 @@ import 'package:myyaris_ios/api/backend.dart';
 import 'package:myyaris_ios/api/login_page.dart';
 import 'package:myyaris_ios/api/user_auth.dart';
 
+const fixtureBackend = 'https://backend.example.test';
+
 const fixtureSession = 'isolated-test-session-012345678901234567890123';
 Map<String, dynamic> profile({bool control = true}) => {
   'id': 'fixture-user',
@@ -106,13 +108,14 @@ void main() {
     () async {
       final legacy = MemoryStore()
         ..value = jsonEncode({
-          'base': defaultBackend,
+          'base': fixtureBackend,
           'device': 'car_p3pro',
           'token': 'isolated-legacy-fixture',
         });
       final auth = MemoryStore(), settings = MemoryStore();
       final requests = <http.Request>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           requests.add(r);
           if (r.url.path.endsWith('/login')) {
@@ -138,7 +141,7 @@ void main() {
       expect(session.authenticated, false);
       expect(api.token, isEmpty);
       expect(legacy.cleared, 0);
-      await session.login(defaultBackend, 'fixture_user', 'fixture-password');
+      await session.login(fixtureBackend, 'fixture_user', 'fixture-password');
       expect(session.authenticated, true);
       expect(session.canControlVehicle, true);
       expect(auth.value!.contains('fixture-password'), false);
@@ -148,7 +151,7 @@ void main() {
       expect(session.authenticated, false);
       expect(auth.value, isNull);
       expect(api.token, isEmpty);
-      expect(settings.value, contains(defaultBackend));
+      expect(settings.value, contains(fixtureBackend));
       expect(legacy.cleared, 0);
       expect(
         requests.map((r) => r.url.path),
@@ -162,12 +165,13 @@ void main() {
       final auth = MemoryStore()
         ..value = UserSessionRecord.fromLogin(
           loginBody(control: false),
-        ).encode(defaultBackend, 'car_p3pro');
+        ).encode(fixtureBackend, 'car_p3pro');
       final settings = MemoryStore()
-        ..value = jsonEncode({'base': defaultBackend, 'device': 'car_p3pro'});
+        ..value = jsonEncode({'base': fixtureBackend, 'device': 'car_p3pro'});
       final methods = <String>[];
       final api = BackendApi(
         client: MockClient((r) async {
+          expect(r.url.origin, fixtureBackend);
           methods.add(r.method);
           expect(r.url.path, '/api/v1/auth/me');
           expect(r.headers['Authorization'], 'Bearer $fixtureSession');
@@ -183,6 +187,9 @@ void main() {
       );
       addTearDown(session.dispose);
       await session.initialize();
+      expect(api.baseUrl, fixtureBackend);
+      expect(settings.cleared, 0);
+      expect(auth.cleared, 0);
       expect(session.authenticated, true);
       expect(session.userProfile['nickname'], '测试昵称');
       expect(session.canControlVehicle, false);
@@ -194,6 +201,7 @@ void main() {
     () async {
       final auth = MemoryStore();
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           expect(r.url.path, '/api/v1/auth/register');
           final body = jsonDecode(r.body) as Map;
@@ -211,7 +219,7 @@ void main() {
       );
       addTearDown(session.dispose);
       await session.register(
-        defaultBackend,
+        fixtureBackend,
         'fixture_user',
         'fixture-password',
         '',
@@ -226,6 +234,7 @@ void main() {
     () async {
       final auth = MemoryStore();
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (r) async => jsonReply({
             'detail': 'must not echo private server body',
@@ -240,7 +249,7 @@ void main() {
       );
       addTearDown(session.dispose);
       await expectLater(
-        session.login(defaultBackend, 'fixture_user', 'wrong-fixture-password'),
+        session.login(fixtureBackend, 'fixture_user', 'wrong-fixture-password'),
         throwsA(
           predicate(
             (e) =>
@@ -254,7 +263,7 @@ void main() {
       expect(session.authenticated, false);
       await expectLater(
         session.register(
-          defaultBackend,
+          fixtureBackend,
           'fixture_user',
           'fixture-password',
           '',
@@ -269,10 +278,11 @@ void main() {
       final auth = MemoryStore()
         ..value = UserSessionRecord.fromLogin(
           loginBody(),
-        ).encode(defaultBackend, 'car_p3pro');
+        ).encode(fixtureBackend, 'car_p3pro');
       final settings = MemoryStore()
-        ..value = jsonEncode({'base': defaultBackend, 'device': 'car_p3pro'});
+        ..value = jsonEncode({'base': fixtureBackend, 'device': 'car_p3pro'});
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((_) async => jsonReply({'detail': 'expired'}, 401)),
       );
       final session = AccountSession(
@@ -296,6 +306,7 @@ void main() {
     () async {
       final auth = MemoryStore();
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (r) async => jsonReply(
             r.url.path.endsWith('/login')
@@ -312,7 +323,7 @@ void main() {
         settingsStore: MemoryStore(),
       );
       addTearDown(session.dispose);
-      await session.login(defaultBackend, 'fixture_user', 'fixture-password');
+      await session.login(fixtureBackend, 'fixture_user', 'fixture-password');
       await expectLater(
         api.call('GET', '/api/v1/music/control/status'),
         throwsA(predicate((e) => e is ApiFailure && e.statusCode == 403)),
@@ -332,6 +343,7 @@ void main() {
     'ordinary login without binding keeps identity and no vehicle control',
     () async {
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (_) async => jsonReply(loginBody(control: false), 200),
         ),
@@ -343,7 +355,7 @@ void main() {
         settingsStore: MemoryStore(),
       );
       addTearDown(session.dispose);
-      await session.login(defaultBackend, 'fixture_user', 'fixture-password');
+      await session.login(fixtureBackend, 'fixture_user', 'fixture-password');
       expect(session.userProfile['role'], 'user');
       expect(session.authenticated, true);
       expect(session.canControlVehicle, false);
@@ -361,6 +373,7 @@ void main() {
       Map<String, String>? headers;
       final auth = MemoryStore();
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (r) async => jsonReply(
             r.url.path.endsWith('/login') ? loginBody() : profile(),
@@ -380,7 +393,7 @@ void main() {
         },
       );
       addTearDown(session.dispose);
-      await session.login(defaultBackend, 'fixture_user', 'fixture-password');
+      await session.login(fixtureBackend, 'fixture_user', 'fixture-password');
       await session.connect();
       expect(headers!['Authorization'], 'Bearer $fixtureSession');
       expect(headers!.containsKey('Cookie'), false);
@@ -398,6 +411,7 @@ void main() {
     'login page clears password on failure and gate hides old navigation routes',
     (tester) async {
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((_) async => jsonReply({}, 401)),
       );
       final session = AccountSession(

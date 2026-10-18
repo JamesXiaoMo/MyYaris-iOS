@@ -16,6 +16,6 @@
 
 本轮没有对真实车机发送导航、播放、seek、音量或管理写入，没有自动登录网易云。**三端仍未完整联调验收**：实际鉴权请求、WSS 断线恢复、后端部署版本、车机幂等与 applied 回报、真实音乐/Range seek、连续导航、会员资源、ASR/NLP provider、Keychain 冷启动持久化与网络配置实际保留。用户截图显示实时连接/playing，不足以证明上述全链路场景均通过。首页精简只移除展示和快捷入口，导航/音乐/设置功能继续从底栏访问。
 
-产物：`/private/tmp/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app`（开发签名 .app，已通过 devicectl 安装，不称为 IPA）。签名项目、scheme、Info.plist 的用户原有未提交改动经哈希核对未变，未纳入本轮提交。
+产物：`build/local-work/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app`（开发签名 .app，已通过 devicectl 安装，不称为 IPA）。签名项目、scheme、Info.plist 的用户原有未提交改动经哈希核对未变，未纳入本轮提交。
 
 2026-10-13 行驶页/收藏夹更新：原手机侧接口之外新增Favorites GET列表/POST/GET详情/PATCH/DELETE共5操作，实际后端创建、独立客户端重读、更新、列表重新加载、删除自己条目已通过；无导航派发。行驶页已按授权删除voice展示入口与任务卡，底层API保留。26 tests通过；最新证据与契约差异见 [行驶页与后端收藏夹验证](行驶页与后端收藏夹验证.md)。

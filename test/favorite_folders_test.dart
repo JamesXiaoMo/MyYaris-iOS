@@ -42,6 +42,7 @@ void main() {
     () async {
       final bodies = <Map>[], queries = <Map<String, String>>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           expect(r.headers['Authorization'], 'Bearer unit');
           if (r.method == 'GET') {
@@ -74,6 +75,7 @@ void main() {
     () async {
       var count = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method == 'POST') {
             count++;
@@ -107,6 +109,7 @@ void main() {
         var expired = 0;
         final api =
             BackendApi(
+                baseUrl: 'https://backend.example.test',
                 client: MockClient(
                   (_) async => json({'detail': 'secret never exposed'}, status),
                 ),
@@ -138,6 +141,7 @@ void main() {
       var writes = 0, expired = 0;
       final api =
           BackendApi(
+              baseUrl: 'https://backend.example.test',
               client: MockClient((r) async {
                 if (r.method != 'GET') writes++;
                 return delayed.future;
@@ -164,6 +168,7 @@ void main() {
       final slow = Completer<http.Response>();
       var moreCalls = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.url.path.startsWith('${FavoritesApi.foldersPath}/')) {
             return json(folder('fld'));
@@ -216,6 +221,7 @@ void main() {
     () async {
       var removed = false;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method == 'DELETE') {
             removed = true;
@@ -250,6 +256,7 @@ void main() {
     () async {
       final old = Completer<http.Response>();
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.url.path.startsWith('${FavoritesApi.foldersPath}/')) {
             return json({}, 404);
@@ -306,8 +313,10 @@ void main() {
       expect(deleted, 0);
       await tester.tap(find.byTooltip('删除分类，保留地址'));
       expect(deleted, 1);
-      final api = BackendApi(client: MockClient((_) async => json({}, 409)))
-        ..token = 'unit';
+      final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
+        client: MockClient((_) async => json({}, 409)),
+      )..token = 'unit';
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: FolderEditor(service: FavoritesApi(api))),

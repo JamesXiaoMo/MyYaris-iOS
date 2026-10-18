@@ -75,6 +75,7 @@ void main() {
     () async {
       var fail = false, timeout = false, malformed = false;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.url.path == '/health') {
             if (timeout) throw TimeoutException('fixture');

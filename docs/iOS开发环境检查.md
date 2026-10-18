@@ -1,4 +1,4 @@
-项目维护者，**本机具备开始 SwiftUI iOS 开发的基础工具链：完整 Xcode、Swift 编译器和 iOS SDK 均已安装，许可与首次启动状态检查通过。** 模拟器运行和真机签名安装尚未验证；不要把当前沙箱查询失败解释成整套环境不完整。
+**本机具备开始 SwiftUI iOS 开发的基础工具链：完整 Xcode、Swift 编译器和 iOS SDK 均已安装，许可与首次启动状态检查通过。** 模拟器运行和真机签名安装尚未验证；不要把当前沙箱查询失败解释成整套环境不完整。
 
 # iOS 开发环境检查
 
@@ -6,7 +6,7 @@
 
 ## 1. 工作目录与独立 Git
 
-目标有效工作目录：`/path/to/user/Desktop/MyYaris/ios_app`。后续项目命令显式使用该 workdir；初始化前的独立环境查询在 `/private/tmp` 执行。聊天 metadata cwd 没有可用修改接口，仍不能声称窗口绑定路径已经改变。
+目标有效工作目录：`.`。后续项目命令显式使用该 workdir；初始化前的独立环境查询在 `<LOCAL_TEMP>` 执行。聊天 metadata cwd 没有可用修改接口，仍不能声称窗口绑定路径已经改变。
 
 目录和初始 Git 由车机工程师负责创建，本文不竞争修改 README／.gitignore，不写车机代码或根目录 iOS 工程。已确认 `git rev-parse --show-toplevel` 指向 ios_app 自身，初始提交为 `efeca37 chore(ios): initialize ios_app repository with minimal readme and gitignore`；审计开始时工作区干净。README／.gitignore 未被本次修改。
 
@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | macOS | 可用 | macOS 27.0.1，build 26A434 |
 | CPU 架构 | 可用 | `uname -m` 为 arm64，Apple Silicon |
-| Xcode.app | 可用 | `/Applications/Xcode.app`，Xcode 27.0，build 27A266a（bundle DTXcodeBuild 27A266） |
-| xcode-select | 可用 | 选中 `/Applications/Xcode.app/Contents/Developer`，并非仅 CommandLineTools |
+| Xcode.app | 可用 | `<XCODE_APP>`，Xcode 27.0，build 27A266a（bundle DTXcodeBuild 27A266） |
+| xcode-select | 可用 | 选中 `<XCODE_APP>/Contents/Developer`，并非仅 CommandLineTools |
 | Swift | 可用 | `xcrun swift --version`：Apple Swift 6.4，目标 arm64-apple-macosx27.0.0 |
 | Clang | 可用 | `xcrun clang --version`：Apple clang 21.0.0，目标 arm64-apple-darwin27.0.0 |
 | iphoneos SDK | 可用 | 27.0；`.../Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.0.sdk` |
@@ -26,11 +26,11 @@
 | First Launch 状态 | 检查通过 | `xcodebuild -checkFirstLaunchStatus` exit 0；未执行 -runFirstLaunch |
 | simctl available runtimes | 未验证服务可用性 | 查询 exit 1，CoreSimulatorService connection invalid、日志写入 Operation not permitted |
 | simctl available devices | 未验证 | 同样受服务／沙箱访问失败影响；不能据此断言没有模拟器设备 |
-| 已挂载 runtime 文件 | 存在 | `/Library/Developer/CoreSimulator/Volumes/iOS_23F77` 内 runtime Info.plist 的名称为 iOS 26.5；文件存在不等于服务可启动 |
-| Ruby | 可用 | `/opt/homebrew/bin/ruby`，4.0.5，arm64-darwin25；本次只查询版本 |
-| Bundler | 可用 | `/opt/homebrew/bin/bundle`，4.0.11；未验证特定项目 Gemfile |
-| CocoaPods | 可用版本查询 | `/opt/homebrew/bin/pod`，1.16.2；未执行 pod install 或解析插件依赖 |
-| Flutter SDK | 存在 | `/path/to/user/source/flutter`，缓存版本记录：3.44.4 stable，Dart 3.12.2 |
+| 已挂载 runtime 文件 | 存在 | `<TOOLCHAIN_PATH>` 内 runtime Info.plist 的名称为 iOS 26.5；文件存在不等于服务可启动 |
+| Ruby | 可用 | `<TOOLCHAIN_PATH>`，4.0.5，arm64-darwin25；本次只查询版本 |
+| Bundler | 可用 | `<TOOLCHAIN_PATH>`，4.0.11；未验证特定项目 Gemfile |
+| CocoaPods | 可用版本查询 | `<TOOLCHAIN_PATH>`，1.16.2；未执行 pod install 或解析插件依赖 |
+| Flutter SDK | 存在 | `<FLUTTER_SDK>`，缓存版本记录：3.44.4 stable，Dart 3.12.2 |
 | Flutter doctor iOS 项 | 未完成 | 直接调用已有 Dart＋flutter_tools snapshot，关闭版本检查；因 SDK cache/lockfile 在当前沙箱不可写而 exit 1，未产出 Xcode 诊断段 |
 | Xcode 账号配置记录 | 存在 | 只查询指定账号列表键是否存在／非空；不输出账号，不证明登录会话有效 |
 | 可访问的有效签名身份 | 未检测到 | `security find-identity -v -p codesigning` 返回 0 valid identities；Apple Development 身份未检测到。未输出证书名称／账号 |
@@ -64,7 +64,7 @@ SDK 和 Simulator Runtime 是两个不同组件：SDK 用于编译，runtime 用
 2. 在普通 Terminal 中核对 Flutter 的 iOS doctor 项：
 
    ```sh
-   /path/to/user/source/flutter/bin/flutter --no-version-check doctor -v
+   flutter --no-version-check doctor -v
    ```
 
    Flutter 常规启动可能写入其已有缓存；本轮沙箱无法写该 SDK 路径。不要直接采纳错误提示中的递归 sudo chown：目前没有证据证明用户终端也存在所有权问题，更不能修改工程师正在使用的 Flutter SDK。
@@ -83,7 +83,7 @@ SDK 和 Simulator Runtime 是两个不同组件：SDK 用于编译，runtime 用
 
 ```sh
 xcrun --sdk iphonesimulator swiftc -parse-as-library \
-  -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.0.sdk \
+  -sdk <XCODE_APP>/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.0.sdk \
   -target arm64-apple-ios17.0-simulator \
   -module-cache-path <临时目录>/ModuleCache \
   <临时目录>/Audit.swift \

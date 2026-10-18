@@ -61,6 +61,7 @@ void main() {
       final rows = <String, Map<String, dynamic>>{};
       final writes = <String>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           expect(r.headers['Authorization'], 'Bearer fixture');
           if (r.method == 'GET' && r.url.path == FavoritesApi.path) {
@@ -114,6 +115,7 @@ void main() {
   );
   test('server and malformed responses do not claim saved', () async {
     final api = BackendApi(
+      baseUrl: 'https://backend.example.test',
       client: MockClient(
         (_) async => jsonResponse('{"detail":"private response"}', 500),
       ),
@@ -124,6 +126,7 @@ void main() {
     );
     expect(FavoritesApi(api).list(), throwsA(isA<ApiFailure>()));
     final malformed = BackendApi(
+      baseUrl: 'https://backend.example.test',
       client: MockClient(
         (_) async => jsonResponse('{"items":[],"total":2}', 200),
       ),
@@ -143,6 +146,7 @@ void main() {
         'coord_system': 'wgs84',
       };
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.url.path == FavoritesApi.foldersPath) {
             return jsonResponse(

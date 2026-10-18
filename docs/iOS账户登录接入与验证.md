@@ -29,13 +29,13 @@
 | 实际公开API | 正常TLS读取OpenAPI，确认register/login/logout/me/profile；SHA256 `f3b92500d2b34c2a2dba7d16ce60c5a50c62a1a03b5f81f8e00e6c949d1431d1`，响应读取2026-10-13 11:51:49 UTC。没有用真实账号登录试探 |
 | 分析/测试 | flutter analyze无问题；43 tests通过。新增9项覆盖登录成功/失败、密码不入存储、旧Keychain保留、普通注册无role/控车/自动登录、恢复me、401清理、403保留身份、普通用户无控车、HTTP/WS同动态Bearer无query/Cookie、WS过期停止重连、密码失败清空与登录门禁隐藏旧页面；原34项协议/音乐/收藏/导航确认/3D手势与小屏回归保留。旧固定协议fixtures只在明确隔离测试模式，不是正式用户绕过登录路径 |
 | 真机 | 同Team/Bundle签名Release 0.3.0+8构建、覆盖安装到iPhone17ProMax、启动成功；codesign deep/strict正常权限验证通过；签名project/scheme/Info.plist用户原有未提交修改哈希未变且不提交 |
-| 登录页 | [空账号、无密码真机截图](assets/login-device.png)已实际打开检查；仅截图入口先检查两个输入都为空才捕获。最终正常入口已恢复lib/main.dart，启动不会自动提交任何账号、注册或运行测试 |
+| 登录页 | [私有验收产物说明](隐私清理与公开准备.md)已实际打开检查；仅截图入口先检查两个输入都为空才捕获。最终正常入口已恢复lib/main.dart，启动不会自动提交任何账号、注册或运行测试 |
 
-产物 `/private/tmp/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app` 是开发签名App，不是IPA。
+产物 `build/local-work/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app` 是开发签名App，不是IPA。
 
 ## 账号是什么 / 用户最少操作
 
-1. 这是MyYaris后端账户登录。此次没有客户端默认用户名/默认密码，也没有我创建的生产账号。根文档的myyaris-user只是API示例，不能当作已存在的账户。
+1. 这是MyYaris后端账户登录。此次没有客户端默认用户名/默认密码，也没有我创建的生产账号。根文档的项目维护者只是API示例，不能当作已存在的账户。
 2. 若已有后端账户，用户在手机输入自己的用户名与密码登录；不把密码发到聊天。
 3. 若尚无账户，在手机点“注册普通账号”，自行设置用户名（3～32位字母、数字、_或-）和密码（8～128位），注册后登录。普通注册不成为管理员，也不自动获得控车。
 4. 若需控车，由已有管理员给该用户授权car_p3pro，再在App设置点“刷新个人资料/权限”。若尚无首管理员，调度需让后端维护者确认并走受控初始化，密码由用户自己提供/设置；iOS不擅自创建或提权。

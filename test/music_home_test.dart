@@ -21,6 +21,7 @@ void main() {
     () async {
       var status = 200;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (_) async => response({
             'logged_in': true,
@@ -56,6 +57,7 @@ void main() {
   test('session/domain switch drops late private account response', () async {
     final old = Completer<http.Response>();
     final api = BackendApi(
+      baseUrl: 'https://backend.example.test',
       client: MockClient(
         (r) async => r.headers['Authorization'] == 'Bearer old'
             ? old.future
@@ -87,6 +89,7 @@ void main() {
     (tester) async {
       final writes = <String>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method != 'GET') writes.add(r.url.path);
           return response({'logged_in': false});

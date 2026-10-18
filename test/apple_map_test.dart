@@ -171,6 +171,7 @@ void main() {
       });
       final session = FixtureSession(
         api: BackendApi(
+          baseUrl: 'https://backend.example.test',
           client: MockClient(
             (_) async => http.Response(
               '{"items":[],"total":0,"has_more":false,"uncategorized_count":0}',

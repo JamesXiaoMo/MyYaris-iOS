@@ -58,3 +58,10 @@ coverage/
 
 # Xcode command cache (not project source)
 ios/com.apple.DeveloperTools/
+
+# Private runtime configuration and real-device evidence (never publish)
+/private/
+/docs/assets/*
+!/docs/assets/README.md
+*.trace/
+*.xcresult/

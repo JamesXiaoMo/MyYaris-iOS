@@ -7,6 +7,8 @@ import 'package:http/testing.dart';
 import 'package:myyaris_ios/api/backend.dart';
 import 'package:myyaris_ios/api/contracts.dart';
 
+const fixtureBackend = 'https://backend.example.test';
+
 Map<String, dynamic> syncedOpenApi() => {
   'components': {
     'schemas': {
@@ -54,7 +56,7 @@ class AckSocket implements WebSocket {
 
 void main() {
   test('all nine canonical commands and parameter aliases validate', () {
-    final origin = Uri.parse(defaultBackend);
+    final origin = Uri.parse(fixtureBackend);
     for (final action in ['pause', 'resume', 'stop', 'next', 'prev']) {
       expect(MusicContract.params(action, {}, origin), {});
     }
@@ -82,7 +84,7 @@ void main() {
       () => MusicContract.params('set_shuffle', {'shuffle': 1}, origin),
       throwsA(isA<ApiFailure>()),
     );
-    final api = BackendApi();
+    final api = BackendApi(baseUrl: 'https://backend.example.test');
     final online = api.trackParams({
       'id': 123,
       'source': 'netease',
@@ -93,7 +95,7 @@ void main() {
     expect(online['song_id'], 123);
     expect(
       online['stream_url'],
-      '$defaultBackend/api/v1/music/netease/stream/123',
+      '$fixtureBackend/api/v1/music/netease/stream/123',
     );
     expect(
       MusicContract.params('play_track', online, origin)['source'],
@@ -106,7 +108,7 @@ void main() {
     });
     expect(
       cached['stream_url'],
-      '$defaultBackend/api/v1/music/stream/netease_123',
+      '$fixtureBackend/api/v1/music/stream/netease_123',
     );
     expect(
       api.trackParams({
@@ -127,6 +129,7 @@ void main() {
   test('data ack completes same command ID once, not playback', () async {
     var sends = 0, httpSends = 0;
     final api = BackendApi(
+      baseUrl: 'https://backend.example.test',
       client: MockClient((_) async {
         httpSends++;
         return http.Response('{}', 200);
@@ -224,6 +227,7 @@ void main() {
     () async {
       var posts = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method == 'POST') posts++;
           return http.Response('{}', 200);
@@ -243,6 +247,7 @@ void main() {
       final writes = <http.Request>[];
       final api =
           BackendApi(
+              baseUrl: 'https://backend.example.test',
               client: MockClient((r) async {
                 if (r.method == 'POST') writes.add(r);
                 if (r.url.path == '/openapi.json') {
@@ -279,6 +284,7 @@ void main() {
     () async {
       var posts = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method == 'POST') posts++;
           return http.Response('{"status":"ok"}', 200);
@@ -296,6 +302,7 @@ void main() {
     'command_status distinguishes execution receipt and never fakes playback',
     () async {
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient(
           (_) async => http.Response(
             '{"command_id":"c1","status":"ok","lifecycle_status":"queued"}',

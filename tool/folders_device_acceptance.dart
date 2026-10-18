@@ -73,7 +73,8 @@ Future<void> main() async {
     // Health and schema must be available over existing strict HTTPS before writes.
     await session.api.call('GET', '/health', auth: false);
     final spec = await session.api.call('GET', '/openapi.json', auth: false);
-    if ((spec['paths'] as Map?)?.containsKey(FavoritesApi.foldersPath) != true) {
+    if ((spec['paths'] as Map?)?.containsKey(FavoritesApi.foldersPath) !=
+        true) {
       throw ApiFailure('生产分类接口尚未就绪');
     }
     proof['health_checked_at_utc'] = DateTime.now().toUtc().toIso8601String();
@@ -209,11 +210,21 @@ Future<void> main() async {
   } finally {
     if (!retainForRestart && service != null) {
       try {
-        final ownFavorites = (await service.page(search: label)).items.where((item) => item.name == label);
-        for (final item in ownFavorites) { await service.delete(item.id); }
+        final ownFavorites = (await service.page(
+          search: label,
+        )).items.where((item) => item.name == label);
+        for (final item in ownFavorites) {
+          await service.delete(item.id);
+        }
         if (favoriteId != null) await service.delete(favoriteId);
         if (folderId != null) await service.deleteFolder(folderId);
-        proof['temporary_records_cleaned'] = !(await service.page(search: label)).items.any((item) => item.name == label) && !(await service.folders(search: label)).items.any((item) => item.name == label || item.name == '${label}_已改名');
+        proof['temporary_records_cleaned'] =
+            !(await service.page(
+              search: label,
+            )).items.any((item) => item.name == label) &&
+            !(await service.folders(search: label)).items.any(
+              (item) => item.name == label || item.name == '${label}_已改名',
+            );
         final element = tree()
             .where((e) => e.widget is DrivingFavoritesDrawer)
             .firstOrNull;

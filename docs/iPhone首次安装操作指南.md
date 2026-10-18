@@ -1,28 +1,28 @@
-项目维护者，**首次安装直接用 Mac 上的 Xcode Personal Team 免费自动签名＋USB，不需要 R9000P，也不部署续签服务。** 已有 Runner.app 是构建产物，没有真机开发签名授权，不是可直接传到手机安装的 IPA；下面让 Xcode 重新构建、签名并安装。
+**首次安装直接用 Mac 上的 Xcode Personal Team 免费自动签名＋USB，不需要 R9000P，也不部署续签服务。** 已有 Runner.app 是构建产物，没有真机开发签名授权，不是可直接传到手机安装的 IPA；下面让 Xcode 重新构建、签名并安装。
 
 # iPhone 首次安装操作指南
 
-核对日期：2026-10-12。工程：`/path/to/user/Desktop/MyYaris/ios_app`。iPhoneOS 和 Simulator 构建已成功，但真机连接、账号有效会话和开发签名还未证实；不保证第一次 Run 就成功。
+核对日期：2026-10-12。工程：`.`。iPhoneOS 和 Simulator 构建已成功，但真机连接、账号有效会话和开发签名还未证实；不保证第一次 Run 就成功。
 
 ## 1. 刷新为本机正式 Flutter SDK
 
 在 Mac 的**普通 Terminal** 中依次执行；某条报错先停，不继续最后一条：
 
 ```sh
-cd /path/to/user/Desktop/MyYaris/ios_app
-/path/to/user/source/flutter/bin/flutter --no-version-check pub get
-/path/to/user/source/flutter/bin/flutter --no-version-check build ios --release --config-only --no-codesign
+cd .
+flutter --no-version-check pub get
+flutter --no-version-check build ios --release --config-only --no-codesign
 open -a Xcode ios/Runner.xcworkspace
 ```
 
-这一步不安装到手机、不申请证书。此前构建使用 `/private/tmp/myyaris-flutter-sdk`；本次已将本地 Generated.xcconfig 与 flutter_export_environment.sh 的 Flutter 路径指回 `/path/to/user/source/flutter`。仍要执行上述命令，刷新 package_config 和其他生成配置，避免依赖临时 SDK。生成配置被 Git 忽略，不需要手工提交。
+这一步不安装到手机、不申请证书。此前构建使用 `build/local-work/myyaris-flutter-sdk`；本次已将本地 Generated.xcconfig 与 flutter_export_environment.sh 的 Flutter 路径指回 `<FLUTTER_SDK>`。仍要执行上述命令，刷新 package_config 和其他生成配置，避免依赖临时 SDK。生成配置被 Git 忽略，不需要手工提交。
 
 ## 2. 接入手机，设置免费签名
 
 1. USB 接 iPhone 到 Mac，解锁手机；若出现 **Trust This Computer?／信任此电脑**，在手机确认并自行输入设备密码。
 2. Xcode 左侧点击蓝色 **Runner** 工程 → 中间 **TARGETS → Runner** → **Signing & Capabilities**。
 3. 勾选 **Automatically manage signing**；**Team** 选择你现有账号的 **Personal Team**，不购买会员、不切换账号。
-4. 当前 **Bundle Identifier** 是 `io.myyaris.myyarisIos`。若 Xcode 提示该标识无法注册／被占用，改为自己唯一的反向域名，例如 `io.myyaris.myyaris-user.app`（示例也需实际检查可用性）。以后尽量保持同一 Team 和 Bundle ID，避免被当作另一个 App 安装。
+4. 公开模板的 **Bundle Identifier** 是 `com.example.myyaris`（既有本机安装标识保持不变）。若 Xcode 提示该标识无法注册／被占用，改为自己唯一的反向域名，例如 `com.example.myyaris`（示例也需实际检查可用性）。以后尽量保持同一 Team 和 Bundle ID，避免被当作另一个 App 安装。
 5. 若 Team 下拉框为空或账号会话失效，打开 **Xcode → Settings → Accounts**，由你确认／登录自己的现有 Apple Account；不要把密码、验证码发到聊天。账号记录存在不等于登录会话有效。正常自动签名可能创建开发证书及 provisioning profile，这是 Xcode 向 Apple 请求免费开发授权。
 
 本版没有推送、iCloud 或其他需付费的服务依赖，首次安装不需要 SideStore、Anisette 或后端网络。

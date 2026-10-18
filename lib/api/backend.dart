@@ -8,8 +8,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
-const defaultBackend =
-    'https://myyaris.example.com';
+const defaultBackend = String.fromEnvironment(
+  'MY_YARIS_BACKEND',
+  defaultValue: '',
+);
 const verifyMode = bool.fromEnvironment('MY_YARIS_VERIFY_LOGS');
 void verifyLog(String event) {
   if (verifyMode) debugPrint('[MyYarisVerify] $event');
@@ -70,9 +72,11 @@ String safeErrorCode(Map value) {
 enum HomeConnectionState { checking, backendOffline, carOffline, online }
 
 class BackendApi {
-  BackendApi({http.Client? client}) : client = client ?? http.Client();
+  BackendApi({http.Client? client, String? baseUrl})
+    : client = client ?? http.Client(),
+      baseUrl = baseUrl ?? defaultBackend;
   final http.Client client;
-  String baseUrl = defaultBackend;
+  String baseUrl;
   String token = '';
   String deviceId = 'car_p3pro';
   bool isUserSession = false;

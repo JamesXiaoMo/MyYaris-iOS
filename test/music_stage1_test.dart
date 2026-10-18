@@ -89,7 +89,8 @@ void main() {
       DateTime.utc(2026, 10, 13, 10),
     );
     expect(MusicContract.backendTimestamp('invalid'), isNull);
-    final api = BackendApi()..token = 'fixture';
+    final api = BackendApi(baseUrl: 'https://backend.example.test')
+      ..token = 'fixture';
     final session = BackendSession(requireUserLogin: false, api: api);
     addTearDown(session.dispose);
     final naive = DateTime.now().toUtc().toIso8601String().replaceFirst(
@@ -104,7 +105,10 @@ void main() {
     'configuration change during preflight does not send stale play command',
     () async {
       final client = ProbeClient()..hold = Completer<void>();
-      final api = BackendApi(client: client)..token = 'fixture';
+      final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
+        client: client,
+      )..token = 'fixture';
       final session = BackendSession(requireUserLogin: false, api: api);
       addTearDown(session.dispose);
       final pending = session.playTrack({'id': 123, 'source': 'netease'});
@@ -119,6 +123,7 @@ void main() {
     () async {
       var error = false, malformed = false;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           expect(r.url.queryParameters['keyword'], '测试');
           return http.Response(
@@ -152,7 +157,10 @@ void main() {
     'Range probe is bounded and aborted; does not read remaining audio',
     () async {
       final client = ProbeClient();
-      final api = BackendApi(client: client)..token = 'fixture';
+      final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
+        client: client,
+      )..token = 'fixture';
       final result = await api.ensureOnlinePlayable({
         'id': 123,
         'source': 'netease',
@@ -185,7 +193,10 @@ void main() {
         if (kind == 'bad-range') client.range = 'bytes 1-1024/4096';
         if (kind == 'bad-audio') client.bytes = utf8.encode('{"not":"audio"}');
         if (kind == 'no-url') client.hasUrl = false;
-        final api = BackendApi(client: client)..token = 'fixture';
+        final api = BackendApi(
+          baseUrl: 'https://backend.example.test',
+          client: client,
+        )..token = 'fixture';
         final session = BackendSession(requireUserLogin: false, api: api);
         await expectLater(
           session.playTrack({'id': 123, 'source': 'netease'}),
@@ -201,7 +212,10 @@ void main() {
     'double selection does one preflight and one command; queued is not playing',
     () async {
       final client = ProbeClient()..hold = Completer<void>();
-      final api = BackendApi(client: client)..token = 'fixture';
+      final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
+        client: client,
+      )..token = 'fixture';
       final session = BackendSession(requireUserLogin: false, api: api);
       addTearDown(session.dispose);
       final first = session.playTrack({
@@ -227,6 +241,7 @@ void main() {
     (tester) async {
       final writes = <Map>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           final data = jsonDecode(r.body) as Map;
           writes.add(data);

@@ -1,17 +1,17 @@
-项目维护者，**Flutter iOS 页面版已完成，模拟器和真机架构原生构建均成功；还没有安装到模拟器或 iPhone。** 当前可交付源码、可审阅的 Flutter 页面渲染图，以及后续正常 Personal Team 安装所需的工程。
+**Flutter iOS 页面版已完成，模拟器和真机架构原生构建均成功；还没有安装到模拟器或 iPhone。** 当前可交付源码、可审阅的 Flutter 页面渲染图，以及后续正常 Personal Team 安装所需的工程。
 
 # Flutter iOS 首版与安装验证
 
-日期：2026-10-12（Asia/Tokyo）。工程根目录 `/path/to/user/Desktop/MyYaris/ios_app`，独立 Git。聊天绑定 cwd metadata 未改变，实际项目命令显式使用 ios_app。
+日期：2026-10-12（Asia/Tokyo）。工程根目录 `.`，独立 Git。聊天绑定 cwd metadata 未改变，实际项目命令显式使用 ios_app。
 
 ## 实现范围
 
 - 参考 `../docs/assets/MyYaris-iPhone-home-preview-v2.png`，已实际查看。
-- 使用 UI 源 HTML 引用的独立车辆资产 `/private/tmp/yaris_cutout_clean.png`，复制到 `assets/images/yaris.png`；没有把整张首页 PNG 用作界面。渐变、文字、卡片、控件和导航均为 Flutter widgets。
+- 使用 UI 源 HTML 引用的独立车辆资产 `build/local-work/yaris_cutout_clean.png`，复制到 `assets/images/yaris.png`；没有把整张首页 PNG 用作界面。渐变、文字、卡片、控件和导航均为 Flutter widgets。
 - 连续深靛青天幕、暖色地平线、深灰底；真实 iOS 状态栏由系统提供，未绘制假时间、灵动岛或电池。
 - 首页包含连接演示、红色 Yaris、四个播控按钮、导航／音乐卡片、快速操作和设备状态；小屏允许滚动，较窄屏和大字体使用纵向卡片。
 - 首页／导航／音乐／设置四个 Tab 都可打开。目的地与音乐输入仅显示本地预览，播控只切换本地状态或显示演示提示。
-- 显示名称 MyYaris，包名 `io.myyaris.myyarisIos`，项目名 `myyaris_ios`；竖屏，SafeArea；最低部署 iOS 15。
+- 显示名称 MyYaris，包名 `com.example.myyaris`，项目名 `myyaris_ios`；竖屏，SafeArea；最低部署 iOS 15。
 - 没有调用后端、车机、地图解析或网易云；没有保存或读取 token。首页的连接、任务、歌曲均标为演示，设备卡显示未接入。
 - 保留原 README、既有 docs、.gitignore 原规则及 Git 历史；仅为 Flutter 补充忽略规则。没有修改 car_app／backend。
 
@@ -21,13 +21,13 @@
 
 | 页面 | 图片 |
 | --- | --- |
-| 首页，390×844 逻辑尺寸 | [首页](assets/home-flutter-390.png) |
-| 首页滚动后的设备卡 | [首页设备状态](assets/home-details-flutter-390.png) |
-| 导航 | [导航](assets/navigation-flutter-390.png) |
-| 音乐 | [音乐](assets/music-flutter-390.png) |
-| 设置 | [设置](assets/settings-flutter-390.png) |
-| 小屏、大字体 | [320×568，1.4 倍文字](assets/home-flutter-320.png) |
-| 大屏 | [430×932](assets/home-flutter-430.png) |
+| 首页，390×844 逻辑尺寸 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 首页滚动后的设备卡 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 导航 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 音乐 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 设置 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 小屏、大字体 | [私有验收产物说明](隐私清理与公开准备.md) |
+| 大屏 | [私有验收产物说明](隐私清理与公开准备.md) |
 
 PNG 为 2 倍像素倍率，已实际打开检查首页、导航与滚动后设备卡，中文可读，顶部没有海报白带。
 
@@ -49,16 +49,16 @@ PNG 为 2 倍像素倍率，已实际打开检查首页、导航与滚动后设�
 
 当前可查看的产物（临时目录，不属于 Git，清理后会消失）：
 
-- `/private/tmp/myyaris-ios-derived-data/Build/Products/Debug-iphonesimulator/Runner.app`
-- `/private/tmp/myyaris-ios-device-derived-data/Build/Products/Debug-iphoneos/Runner.app`
+- `build/local-work/myyaris-ios-derived-data/Build/Products/Debug-iphonesimulator/Runner.app`
+- `build/local-work/myyaris-ios-device-derived-data/Build/Products/Debug-iphoneos/Runner.app`
 
 `FLUTTER_TARGET=lib/main.dart` 已核对，原生构建没有使用 `tool/render_audit.dart`。
 
 ## 构建问题与已处理事项
 
-1. 原 SDK 在沙箱外无法写 cache/lockfile。使用 APFS clone 在 `/private/tmp/myyaris-flutter-sdk` 建立独立 SDK 副本；pub 缓存只复制 hosted 与 hosted-hashes，不复制凭据文件。没有修改原 Flutter SDK、安装新 Xcode 或升级系统。
+1. 原 SDK 在沙箱外无法写 cache/lockfile。使用 APFS clone 在 `build/local-work/myyaris-flutter-sdk` 建立独立 SDK 副本；pub 缓存只复制 hosted 与 hosted-hashes，不复制凭据文件。没有修改原 Flutter SDK、安装新 Xcode 或升级系统。
 2. 此版本 Flutter 模板带本地 SwiftPM 包，解析会写入沙箱外的 SwiftPM 缓存。本版没有任何原生插件，已通过项目 `flutter.config.enable-swift-package-manager: false` 并移除空包引用采用不依赖该空包的工程。未安装 Pods。以后添加原生插件时再按实际插件决定 SwiftPM／Pods。
-3. Desktop File Provider 会给生成 framework 增加 Finder 元数据，导致框架 ad hoc 校验报 `resource fork, Finder information, or similar detritus not allowed`。只清理临时 SDK／构建副本的属性，并把原生 DerivedData 移到 `/private/tmp`，未改动原 SDK。没有关掉签名校验或 TLS 校验。
+3. Desktop File Provider 会给生成 framework 增加 Finder 元数据，导致框架 ad hoc 校验报 `resource fork, Finder information, or similar detritus not allowed`。只清理临时 SDK／构建副本的属性，并把原生 DerivedData 移到 `<LOCAL_TEMP>`，未改动原 SDK。没有关掉签名校验或 TLS 校验。
 4. Flutter 模板的 iOS 13 deployment target 不符合本机 Xcode 27 的支持范围；工程与 AppFrameworkInfo 改为 iOS 15。arm64 构建明确指定 `ARCHS=arm64`。
 5. 当前 CLI 禁止网络监听和 CoreSimulator 服务访问，且 Computer Use 返回 `Computer Use was not approved to use Device Hub`。本轮执行权限不提供提权批准入口，因此未绕过该限制，也未改系统权限。
 
@@ -68,12 +68,12 @@ PNG 为 2 倍像素倍率，已实际打开检查首页、导航与滚动后设�
 xcodebuild -project ios/Runner.xcodeproj -scheme Runner \
   -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /private/tmp/myyaris-ios-derived-data \
+  -derivedDataPath build/local-work/myyaris-ios-derived-data \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
   COMPILER_INDEX_STORE_ENABLE=NO \
-  CLANG_MODULE_CACHE_PATH=/private/tmp/myyaris-xcode-module-cache \
-  SWIFT_MODULE_CACHE_PATH=/private/tmp/myyaris-swift-module-cache
+  CLANG_MODULE_CACHE_PATH=build/local-work/myyaris-xcode-module-cache \
+  SWIFT_MODULE_CACHE_PATH=build/local-work/myyaris-swift-module-cache
 ```
 
 真机无开发签名构建将 SDK／destination 换为 `iphoneos`／`generic/platform=iOS`，并使用独立 DerivedData 目录。本命令仅构建，不安装。
@@ -85,7 +85,7 @@ xcodebuild -project ios/Runner.xcodeproj -scheme Runner \
 1. 在普通 Terminal 中刷新工程为自己的正常 Flutter SDK 路径（本轮生成的 xcconfig 使用临时 SDK，已被 Git 忽略）：
 
    ```sh
-   cd /path/to/user/Desktop/MyYaris/ios_app
+   cd .
    flutter pub get
    flutter build ios --config-only --no-codesign
    open ios/Runner.xcworkspace
@@ -103,7 +103,7 @@ xcodebuild -project ios/Runner.xcodeproj -scheme Runner \
 - `lib/main.dart`：全部本地页面。
 - `test/widget_test.dart`：常规 Flutter widget tests，在允许 localhost socket 的环境执行。
 - `tool/render_audit.dart`：无 VM 服务的引擎布局／交互审计；只作为开发工具，不进入正式 App 入口。
-- `assets/images/yaris.png`：UI 源独立车辆图。
+- 私有验收产物（见隐私清理记录）：UI 源独立车辆图。
 
 无服务环境的复现方式：
 

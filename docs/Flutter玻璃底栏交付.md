@@ -18,9 +18,9 @@ flutter analyze无问题；全部46项tests通过。新测试覆盖拖动跟随�
 
 ## 真机证据
 
-同原Team/BundleID签名Release构建、覆盖安装、启动均成功。设备iPhone17ProMax / iOS27.0.1。开发签名产物为 `/private/tmp/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app`，不是IPA。
+同原Team/BundleID签名Release构建、覆盖安装、启动均成功。设备iPhone17ProMax / iOS27.0.1。开发签名产物为 `build/local-work/myyaris-sync-signed-derived-data/Build/Products/Release-iphoneos/Runner.app`，不是IPA。
 
-第二轮真机自动验收已完成（2026-10-13 14:54:54 UTC开始）：首页截图时index=0；拖动中index=0，胶囊位于中间；松手后index=3；四页全部打开且最终回首页。`docs/assets/glass-tabs-proof.json`记录completed=true。完整截图已实际打开检查：首页/拖动中/行驶/音乐/设置，3D材质正常显示，底栏无覆盖按钮。
+第二轮真机自动验收已完成（2026-10-13 14:54:54 UTC开始）：首页截图时index=0；拖动中index=0，胶囊位于中间；松手后index=3；四页全部打开且最终回首页。私有验收产物（见隐私清理记录）记录completed=true。完整截图已实际打开检查：首页/拖动中/行驶/音乐/设置，3D材质正常显示，底栏无覆盖按钮。
 
 首轮未通过：选中页与预期不一致，不能算通过，原记录保留在`glass-tabs-first-attempt.json`。用户随后确认暂不触摸屏幕；验收驱动补充时间戳并仅在测试入口关闭输入重采样、结束恢复，第二轮通过。不把首轮原因断言为用户误操作。
 
@@ -34,6 +34,6 @@ flutter analyze无问题；全部46项tests通过。新测试覆盖拖动跟随�
 
 iOS15真实设备、真实用户手指的手感、系统辅助设置的实机切换、极端低性能设备帧率仍待测。业务联调沿用既有报告，本轮没有新增搜索/播放/导航验收，不能据底栏测试声称业务全链路已通过。
 
-截图：[首页](assets/glass-home-device.png)、[拖动中](assets/glass-drag-device.png)、[行驶](assets/glass-driving-device.png)、[音乐](assets/glass-music-device.png)、[设置](assets/glass-settings-device.png)。
+截图：[私有验收产物说明](隐私清理与公开准备.md)、[私有验收产物说明](隐私清理与公开准备.md)、[私有验收产物说明](隐私清理与公开准备.md)、[私有验收产物说明](隐私清理与公开准备.md)、[私有验收产物说明](隐私清理与公开准备.md)。
 
 正常安装结果（只记录布尔值，不记录设备/签名身份）：signed_build=true、installed=true、launched=true。截图来自同一业务源码的独立验收入口；正常入口没有额外自动操作。

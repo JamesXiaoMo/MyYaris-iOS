@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:myyaris_ios/api/backend.dart';
 
+const fixtureBackend = 'https://backend.example.test';
+
 class StubSocket implements WebSocket {
   StubSocket(this.onSend);
   final void Function(dynamic) onSend;
@@ -20,11 +22,22 @@ class StubSocket implements WebSocket {
 }
 
 void main() {
+  test('public build has no backend default and rejects an empty origin', () {
+    expect(defaultBackend, isEmpty);
+    final api = BackendApi();
+    expect(api.baseUrl, isEmpty);
+    expect(
+      () => BackendApi.validateBase(api.baseUrl),
+      throwsA(isA<ApiFailure>()),
+    );
+    api.close();
+  });
   test(
     'command follows live params schema and uses header auth only',
     () async {
       late http.Request captured;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           captured = r;
           return http.Response('{"status":"ok"}', 200);
@@ -42,13 +55,13 @@ void main() {
     },
   );
   test('stream URL uses configured private origin, not returned localhost', () {
-    final api = BackendApi();
+    final api = BackendApi(baseUrl: 'https://backend.example.test');
     expect(
       api.canonicalStream({
         'id': 123,
         'stream_url': 'http://127.0.0.1:8000/api/v1/music/netease/stream/123',
       }),
-      '$defaultBackend/api/v1/music/netease/stream/123',
+      '$fixtureBackend/api/v1/music/netease/stream/123',
     );
     api.close();
   });
@@ -64,6 +77,7 @@ void main() {
         throwsA(isA<ApiFailure>()),
       );
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async => throw StateError('must not send')),
       );
       await expectLater(api.command('pause'), throwsA(isA<ApiFailure>()));
@@ -75,6 +89,7 @@ void main() {
     () async {
       var requests = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           requests++;
           return http.Response('{"cookie":"private"}', 500);
@@ -120,6 +135,7 @@ void main() {
   test('WebSocket command ack completes once without HTTP duplicate', () async {
     var requests = 0;
     final api = BackendApi(
+      baseUrl: 'https://backend.example.test',
       client: MockClient((r) async {
         requests++;
         return http.Response('{}', 200);
@@ -147,6 +163,7 @@ void main() {
     () async {
       var requests = 0;
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           requests++;
           return http.Response('{}', 200);
@@ -166,6 +183,7 @@ void main() {
     'audio upload uses multipart, target device, idempotency and header auth',
     () async {
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.url.path == '/health') {
             return http.Response(

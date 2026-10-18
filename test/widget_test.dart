@@ -35,6 +35,7 @@ void main() {
     (tester) async {
       final writes = <String>[];
       final api = BackendApi(
+        baseUrl: 'https://backend.example.test',
         client: MockClient((r) async {
           if (r.method == 'POST') writes.add(r.url.path);
           final data = switch (r.url.path) {

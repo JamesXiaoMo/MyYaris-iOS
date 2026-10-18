@@ -42,7 +42,7 @@ http.Response reply(Object body, [int status = 200]) => http.Response(
   headers: {'content-type': 'application/json'},
 );
 FixtureSession owner(http.Client client) => FixtureSession(
-  api: BackendApi(client: client)
+  api: BackendApi(baseUrl: 'https://backend.example.test', client: client)
     ..token = 'isolated-admin-session'
     ..isUserSession = true,
 )..userProfile = {'role': 'admin'};
