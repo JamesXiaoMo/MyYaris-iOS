@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:myyaris_ios/main.dart' as production;
 import 'package:myyaris_ios/api/backend.dart';
 import 'package:myyaris_ios/api/pages.dart';
+import 'package:myyaris_ios/api/music_home.dart' show VinylRecord;
 import 'package:myyaris_ios/verification/favorites_evidence.dart'
     show saveEvidence;
 
@@ -136,8 +137,28 @@ Future<void> main() async {
             as InkWell;
     tab.onTap!();
     await Future<void>.delayed(const Duration(seconds: 1));
+    final record =
+        tree()
+                .firstWhere(
+                  (e) => e.widget.key == const ValueKey('music-record-open'),
+                )
+                .widget
+            as VinylRecord;
+    record.onTap!();
+    await until(() => tree().any((e) => e.widget is MusicPlayerPage));
+    final searchButton =
+        tree()
+                .firstWhere(
+                  (e) => e.widget.key == const ValueKey('music-player-search'),
+                )
+                .widget
+            as IconButton;
+    searchButton.onPressed!();
+    await until(() => tree().any((e) => e.widget is MusicSearchPage));
     final musicElement =
-        tree().firstWhere((e) => e is StatefulElement && e.widget is MusicPage)
+        tree().firstWhere(
+              (e) => e is StatefulElement && e.widget is MusicSearchPage,
+            )
             as StatefulElement;
     final dynamic music = musicElement.state;
     await until(() => !session!.refreshing);
@@ -156,7 +177,7 @@ Future<void> main() async {
     originalGain = gain.toDouble();
     originalLoop = initial['loop_mode'] as String?;
     final earlyPanel =
-        tree(musicElement).firstWhere(
+        tree().firstWhere(
               (e) => e is StatefulElement && e.widget is PlaybackPanel,
             )
             as StatefulElement;
@@ -203,7 +224,7 @@ Future<void> main() async {
     proof['phase'] = 'search_complete';
     await save();
     final panelElement =
-        tree(musicElement).firstWhere(
+        tree().firstWhere(
               (e) => e is StatefulElement && e.widget is PlaybackPanel,
             )
             as StatefulElement;
@@ -284,6 +305,8 @@ Future<void> main() async {
             1000) {
       throw StateError('position未自然增长或播放器未保持playing');
     }
+    Navigator.of(musicElement).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
     await Scrollable.ensureVisible(
       panelElement,
       duration: const Duration(milliseconds: 200),

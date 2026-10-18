@@ -45,7 +45,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
       if (mounted && who == model.identity) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('播放指令已提交；请回音乐页核对 commandID、执行回执与车机状态，不代表已经发声'),
+            content: Text('播放指令已提交；请打开音乐页右下角唱片，核对 commandID、执行回执与车机状态，不代表已经发声'),
           ),
         );
       }

@@ -70,7 +70,7 @@ import UniformTypeIdentifiers
         if UserDefaults.standard.bool(forKey: key) { result(false) }
         else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png", "map-search-device.png", "folder-overview-device.png", "folder-address-device.png", "folder-delete-device.png", "folder-uncategorized-device.png", "map-gesture-device.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png", "map-search-device.png", "folder-overview-device.png", "folder-address-device.png", "folder-delete-device.png", "folder-uncategorized-device.png", "map-gesture-device.png", "music-home-v2-device.png", "music-search-v2-device.png", "music-player-v2-device.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -83,7 +83,7 @@ import UniformTypeIdentifiers
         catch { result(FlutterError(code: "SCREENSHOT_WRITE", message: "App截图保存失败", details: nil)) }
       case "saveEvidence":
         guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
-              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json", "map-ui-proof.json", "folder-sync-created.json", "folder-sync-proof.json", "map-gesture-proof.json"].contains(name),
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json", "map-ui-proof.json", "folder-sync-created.json", "folder-sync-proof.json", "map-gesture-proof.json", "music-layout-proof.json"].contains(name),
               let bytes = payload["bytes"] as? FlutterStandardTypedData,
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
           result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return

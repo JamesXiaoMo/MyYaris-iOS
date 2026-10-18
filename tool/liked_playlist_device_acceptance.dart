@@ -42,7 +42,7 @@ Future<void> main() async {
   production.main();
   await Future<void>.delayed(const Duration(seconds: 5));
   final proof = <String, dynamic>{
-    'version': '0.3.2+10',
+    'version': '0.5.0+17',
     'started_at_utc': DateTime.now().toUtc().toIso8601String(),
     'input': 'actual app UI callbacks and scroll controller on real iPhone',
     'business_commands_sent': false,
@@ -67,8 +67,8 @@ Future<void> main() async {
                   (e) => e.widget.key == const ValueKey('liked-music-entry'),
                 )
                 .widget
-            as OutlinedButton;
-    button.onPressed!();
+            as ListTile;
+    button.onTap!();
     await until(() => tree().any((e) => e.widget is LikedMusicPage));
     final element =
         tree().firstWhere((e) => e.widget is LikedMusicPage) as StatefulElement;
