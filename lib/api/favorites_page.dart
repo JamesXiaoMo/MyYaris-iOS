@@ -197,10 +197,14 @@ class FavoriteEditor extends StatefulWidget {
     required this.service,
     this.item,
     this.initialSelection,
+    this.initialFolderId,
+    this.onReconcile,
   });
   final FavoritesApi service;
   final Favorite? item;
   final MapSelection? initialSelection;
+  final String? initialFolderId;
+  final Future<void> Function()? onReconcile;
   @override
   State<FavoriteEditor> createState() => _FavoriteEditorState();
 }
@@ -222,8 +226,34 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
         widget.item?.longitude.toString() ??
         widget.initialSelection?.longitude.toString(),
   );
-  bool busy = false;
-  String? error;
+  bool busy = false,
+      uncertain = false,
+      folderChanged = false,
+      foldersBusy = true;
+  List<FavoriteFolder> folders = [];
+  late String? folderId = widget.item?.folderId ?? widget.initialFolderId;
+  String? error, folderError;
+  @override
+  void initState() {
+    super.initState();
+    loadFolders();
+  }
+
+  Future<void> loadFolders() async {
+    setState(() {
+      foldersBusy = true;
+      folderError = null;
+    });
+    try {
+      final value = await widget.service.allFolders();
+      if (mounted) setState(() => folders = value);
+    } catch (e) {
+      if (mounted) setState(() => folderError = favoriteError(e));
+    } finally {
+      if (mounted) setState(() => foldersBusy = false);
+    }
+  }
+
   @override
   void dispose() {
     name.dispose();
@@ -234,7 +264,7 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
   }
 
   Future<void> save() async {
-    if (busy) return;
+    if (busy || uncertain) return;
     try {
       final body = Favorite.validate(
         name.text,
@@ -246,10 +276,20 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
         busy = true;
         error = null;
       });
+      if (folderChanged || widget.item == null) body['folder_id'] = folderId;
       await widget.service.save(body, id: widget.item?.id);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (e is FavoriteWriteUncertain ||
+          e is ApiFailure && {404, 409}.contains(e.statusCode)) {
+        await widget.onReconcile?.call();
+      }
+      if (mounted) {
+        setState(() {
+          error = favoriteError(e);
+          uncertain = e is FavoriteWriteUncertain;
+        });
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -300,6 +340,39 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
               ),
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: ValueKey(
+                'favorite-folder-${folderId ?? 'none'}-${folders.length}',
+              ),
+              initialValue: folderId ?? '',
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: '所属分类'),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('未分类')),
+                if (folderId != null && !folders.any((v) => v.id == folderId))
+                  DropdownMenuItem(
+                    value: folderId,
+                    child: Text(widget.item?.folderName ?? '当前分类'),
+                  ),
+                for (final folder in folders)
+                  DropdownMenuItem(
+                    value: folder.id,
+                    child: Text(folder.name, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: busy || uncertain || foldersBusy || folderError != null
+                  ? null
+                  : (value) => setState(() {
+                      folderId = value == '' ? null : value;
+                      folderChanged = true;
+                    }),
+            ),
+            if (foldersBusy) const LinearProgressIndicator(),
+            if (folderError != null)
+              TextButton(
+                onPressed: loadFolders,
+                child: Text('分类加载失败，点击重试：$folderError'),
+              ),
             const Text('仅保存收藏，不解析或发送导航'),
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
@@ -313,7 +386,8 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: busy ? null : save,
+          key: const ValueKey('favorite-save'),
+          onPressed: busy || uncertain ? null : save,
           child: Text(busy ? '保存中…' : '保存到后端'),
         ),
       ],

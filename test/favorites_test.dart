@@ -65,7 +65,11 @@ void main() {
           expect(r.headers['Authorization'], 'Bearer fixture');
           if (r.method == 'GET' && r.url.path == FavoritesApi.path) {
             return jsonResponse(
-              jsonEncode({'items': rows.values.toList(), 'total': rows.length}),
+              jsonEncode({
+                'items': rows.values.toList(),
+                'total': rows.length,
+                'has_more': false,
+              }),
               200,
             );
           }
@@ -140,6 +144,12 @@ void main() {
       };
       final api = BackendApi(
         client: MockClient((r) async {
+          if (r.url.path == FavoritesApi.foldersPath) {
+            return jsonResponse(
+              '{"items":[],"total":0,"has_more":false,"uncategorized_count":1}',
+              200,
+            );
+          }
           if (r.method != 'GET') writes.add(r.url.path);
           if (r.method == 'DELETE') {
             return jsonResponse('{"status":"ok","deleted_id":"fav_test"}', 200);
@@ -148,6 +158,7 @@ void main() {
             jsonEncode({
               'items': [row],
               'total': 1,
+              'has_more': false,
             }),
             200,
           );
