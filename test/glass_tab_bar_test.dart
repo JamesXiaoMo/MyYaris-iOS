@@ -1,11 +1,126 @@
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myyaris_ios/glass_tab_bar.dart';
 import 'package:myyaris_ios/main.dart';
+import 'package:myyaris_ios/api/driving_favorites_drawer.dart';
+import 'package:myyaris_ios/api/music_home.dart' show VinylRecord;
 import 'package:myyaris_ios/api/login_page.dart';
 import 'widget_test.dart' show FixtureSession;
 
 void main() {
+  testWidgets(
+    'glass pixels change with the layer underneath, without an opaque strip',
+    (tester) async {
+      final boundary = GlobalKey();
+      var background = Colors.red;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, set) {
+              update = set;
+              return RepaintBoundary(
+                key: boundary,
+                child: Scaffold(
+                  extendBody: true,
+                  body: ColoredBox(
+                    color: background,
+                    child: const SizedBox.expand(),
+                  ),
+                  bottomNavigationBar: GlassTabBar(index: 0, onChanged: (_) {}),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final bar = tester.getRect(find.byKey(const ValueKey('glass-tab-bar')));
+      final point = Offset(bar.right - 18, bar.center.dy);
+      Future<List<int>> pixel() async {
+        return (await tester.runAsync(() async {
+          final box =
+              boundary.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
+          final image = await box.toImage(pixelRatio: 1);
+          final data = (await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          ))!;
+          final offset =
+              (point.dy.toInt() * image.width + point.dx.toInt()) * 4;
+          final bytes = data.buffer.asUint8List();
+          final result = bytes.sublist(offset, offset + 4);
+          image.dispose();
+          return result;
+        }))!;
+      }
+
+      final red = await pixel();
+      update(() => background = Colors.blue);
+      await tester.pumpAndSettle();
+      final blue = await pixel();
+      expect(red[0], greaterThan(red[2] + 50));
+      expect(blue[2], greaterThan(blue[0] + 50));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'page paints behind glass; drawer scroll tail and record avoid overlay',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      tester.view.padding = const FakeViewPadding(top: 47, bottom: 34);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPadding);
+      final session = FixtureSession();
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: YarisShell(session: session, initializeSession: false),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Scaffold>(find.byType(Scaffold).first).extendBody,
+        true,
+      );
+      await tester.tap(find.byKey(const ValueKey('tab-1')));
+      await tester.pumpAndSettle();
+      final bar = tester.getRect(find.byKey(const ValueKey('glass-tab-bar')));
+      final drawer = tester.getRect(find.byType(DrivingFavoritesDrawer));
+      expect(drawer.bottom, greaterThan(bar.bottom));
+      expect(drawer.top, lessThan(bar.top));
+      final list = tester.widget<ListView>(
+        find.descendant(
+          of: find.byType(DrivingFavoritesDrawer),
+          matching: find.byType(ListView),
+        ),
+      );
+      expect(
+        (list.padding! as EdgeInsets).bottom,
+        greaterThan(bar.height + 34),
+      );
+      await tester.tap(find.byKey(const ValueKey('tab-2')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byType(VinylRecord)).bottom,
+        lessThan(bar.top),
+      );
+      await tester.tap(find.byKey(const ValueKey('tab-3')));
+      await tester.pumpAndSettle();
+      final settingsList = tester.widget<ListView>(find.byType(ListView).first);
+      expect(
+        (settingsList.padding! as EdgeInsets).bottom,
+        greaterThan(bar.height + 34),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets(
     'drag follows pointer, commits only once on release, cancel restores',
     (tester) async {

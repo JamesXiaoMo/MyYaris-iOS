@@ -39,7 +39,7 @@ Future<void> main() async {
   final clock = Stopwatch()..start();
   await Future<void>.delayed(const Duration(seconds: 7));
   final proof = <String, dynamic>{
-    'version': '0.3.1+9',
+    'version': '0.5.2+19',
     'started_at_utc': DateTime.now().toUtc().toIso8601String(),
     'input': 'automated Flutter pointer events on actual iPhone',
     'capture': 'full native application window including WKWebView',

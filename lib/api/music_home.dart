@@ -134,7 +134,12 @@ class _MusicPageState extends State<MusicPage> {
         RefreshIndicator(
           onRefresh: account.refresh,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(22, 8, 22, 184),
+            padding: EdgeInsets.fromLTRB(
+              22,
+              8,
+              22,
+              184 + MediaQuery.paddingOf(context).bottom,
+            ),
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
               Row(
@@ -279,7 +284,7 @@ class _MusicPageState extends State<MusicPage> {
         ),
         Positioned(
           right: 24,
-          bottom: 20,
+          bottom: 20 + MediaQuery.paddingOf(context).bottom,
           child: VinylRecord(
             key: const ValueKey('music-record-open'),
             session: widget.session,

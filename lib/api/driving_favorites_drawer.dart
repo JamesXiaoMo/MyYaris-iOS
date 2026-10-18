@@ -217,7 +217,12 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
       clipBehavior: Clip.antiAlias,
       child: ListView(
         controller: widget.controller,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          8,
+          16,
+          24 + MediaQuery.paddingOf(context).bottom,
+        ),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
           Center(

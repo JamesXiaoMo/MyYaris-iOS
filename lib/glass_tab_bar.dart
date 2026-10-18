@@ -112,7 +112,7 @@ class _GlassTabBarState extends State<GlassTabBar>
             borderRadius: BorderRadius.circular(36),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x66000000),
+                color: Color(0x28000000),
                 blurRadius: 18,
                 offset: Offset(0, 6),
               ),

@@ -145,6 +145,7 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
     builder: (context, _) => AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
+        extendBody: true,
         body: Stack(
           children: [
             Positioned(
@@ -198,8 +199,9 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
             ),
           ],
         ),
-        // Scaffold reserves this whole region: content/3D never sit under it.
-        // Hide consistently while typing; the body's keyboard inset stays active.
+        // The page paints behind the floating glass. Scroll views consume the
+        // Scaffold-provided bottom inset as trailing space, not a black strip.
+        // Hide consistently while typing; the body keyboard inset stays active.
         bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
             ? const SizedBox.shrink()
             : GlassTabBar(
@@ -228,7 +230,12 @@ class _HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     key: const ValueKey('home-scroll'),
-    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+    padding: EdgeInsets.fromLTRB(
+      20,
+      12,
+      20,
+      24 + MediaQuery.paddingOf(context).bottom,
+    ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

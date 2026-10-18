@@ -139,6 +139,15 @@ class _NavigationPageState extends State<NavigationPage> {
   final mapController = AppleMapController();
   final drawer = DraggableScrollableController();
   double drawerExtent = .34, heldDrawerExtent = .34;
+  double _sheetHeight = 0;
+  double get _barFraction => _sheetHeight <= 0
+      ? 0
+      : (MediaQuery.paddingOf(context).bottom / _sheetHeight).clamp(0, .5);
+  double _sheetSize(double visibleExtent) =>
+      (_barFraction + (1 - _barFraction) * visibleExtent).clamp(0, 1);
+  double _visibleSize(double sheetExtent) =>
+      ((sheetExtent - _barFraction) / (1 - _barFraction)).clamp(0, 1);
+
   bool mapInteracting = false;
   void mapInteractionChanged(bool active) {
     if (!mounted || mapInteracting == active) return;
@@ -160,8 +169,8 @@ class _NavigationPageState extends State<NavigationPage> {
     drawer.addListener(() {
       if (mounted &&
           drawer.isAttached &&
-          (drawer.size - drawerExtent).abs() > .005) {
-        setState(() => drawerExtent = drawer.size);
+          (_visibleSize(drawer.size) - drawerExtent).abs() > .005) {
+        setState(() => drawerExtent = _visibleSize(drawer.size));
       }
     });
   }
@@ -178,7 +187,7 @@ class _NavigationPageState extends State<NavigationPage> {
     });
     if (drawer.isAttached) {
       drawer.animateTo(
-        .46,
+        _sheetSize(.46),
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
@@ -233,7 +242,7 @@ class _NavigationPageState extends State<NavigationPage> {
     );
     if (mounted && drawer.isAttached) {
       drawer.animateTo(
-        .70,
+        _sheetSize(.70),
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
@@ -536,53 +545,58 @@ class _NavigationPageState extends State<NavigationPage> {
         ),
         Expanded(
           child: LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              children: [
-                Positioned.fill(
-                  bottom:
-                      (constraints.maxHeight *
-                                  (mapInteracting
-                                      ? heldDrawerExtent
-                                      : drawerExtent) -
-                              24)
-                          .clamp(0.0, constraints.maxHeight),
-                  child: AppleMap(
-                    controller: mapController,
-                    onInteractionChanged: mapInteractionChanged,
-                    active: widget.active,
-                    selection: mapSelection,
-                    onSelected: selectPoint,
+            builder: (context, constraints) {
+              _sheetHeight = constraints.maxHeight;
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    bottom:
+                        (constraints.maxHeight *
+                                    _sheetSize(
+                                      mapInteracting
+                                          ? heldDrawerExtent
+                                          : drawerExtent,
+                                    ) -
+                                24)
+                            .clamp(0.0, constraints.maxHeight),
+                    child: AppleMap(
+                      controller: mapController,
+                      onInteractionChanged: mapInteractionChanged,
+                      active: widget.active,
+                      selection: mapSelection,
+                      onSelected: selectPoint,
+                    ),
                   ),
-                ),
-                DraggableScrollableSheet(
-                  controller: drawer,
-                  minChildSize: .22,
-                  initialChildSize: .34,
-                  maxChildSize: .86,
-                  snap: true,
-                  snapSizes: const [.22, .34, .70, .86],
-                  builder: (context, scroll) => DrivingFavoritesDrawer(
-                    session: widget.session,
-                    controller: scroll,
-                    selection: mapSelection,
-                    destinationPanel:
-                        (mapSelection != null ||
-                            input.text.trim().isNotEmpty ||
-                            resolved != null)
-                        ? panel
-                        : const SizedBox.shrink(),
-                    onInput: enterDestination,
-                    onSelected: (favorite) => selectPoint(
-                      MapSelection(
-                        favorite.latitude,
-                        favorite.longitude,
-                        title: favorite.displayName,
+                  DraggableScrollableSheet(
+                    controller: drawer,
+                    minChildSize: _sheetSize(.22),
+                    initialChildSize: _sheetSize(.34),
+                    maxChildSize: _sheetSize(.86),
+                    snap: true,
+                    snapSizes: [.22, .34, .70, .86].map(_sheetSize).toList(),
+                    builder: (context, scroll) => DrivingFavoritesDrawer(
+                      session: widget.session,
+                      controller: scroll,
+                      selection: mapSelection,
+                      destinationPanel:
+                          (mapSelection != null ||
+                              input.text.trim().isNotEmpty ||
+                              resolved != null)
+                          ? panel
+                          : const SizedBox.shrink(),
+                      onInput: enterDestination,
+                      onSelected: (favorite) => selectPoint(
+                        MapSelection(
+                          favorite.latitude,
+                          favorite.longitude,
+                          title: favorite.displayName,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -1218,7 +1232,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(22),
+    padding: EdgeInsets.fromLTRB(
+      22,
+      22,
+      22,
+      22 + MediaQuery.paddingOf(context).bottom,
+    ),
     children: [
       heading('设置', '登录会话保存在本机 Keychain，密码不持久化。'),
       card([
