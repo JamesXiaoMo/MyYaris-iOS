@@ -57,6 +57,10 @@ void main() {
       );
       await tester.pump();
       expect(name, isNotNull);
+      expect(
+        find.byType(Image),
+        findsNothing,
+      ); // No static poster while loading.
       final done = Completer<void>();
       messenger.handlePlatformMessage(
         name!,
@@ -69,6 +73,7 @@ void main() {
       await tester.pump();
       await tester.drag(find.byType(CarModel), const Offset(100, 0));
       expect(calls.where((c) => c.method == 'yaw'), isNotEmpty);
+      expect(find.byType(Image), findsNothing);
       final before = calls.where((c) => c.method == 'yaw').length;
       await tester.drag(find.byType(CarModel), const Offset(0, -90));
       expect(scroll.offset, greaterThan(0));

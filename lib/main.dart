@@ -239,14 +239,17 @@ class _HomePage extends StatelessWidget {
           runSpacing: 10,
           children: [
             const Text(
-              'Toyota Yaris ⌄',
+              'Toyota Yaris',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
             _badge(
-              '后端 · ${session.backendLabel}',
-              session.displayedBackendOnline == true
-                  ? const Color(0xFF48D882)
-                  : _muted,
+              session.homeConnectionLabel,
+              switch (session.homeConnectionState) {
+                HomeConnectionState.backendOffline => const Color(0xFFFF6370),
+                HomeConnectionState.carOffline => const Color(0xFFFFCC66),
+                HomeConnectionState.online => const Color(0xFF48D882),
+                HomeConnectionState.checking => _muted,
+              },
               icon: Icons.circle,
               iconSize: 8,
             ),

@@ -67,6 +67,8 @@ String safeErrorCode(Map value) {
   return allowed.contains(code) ? code : '接口错误（请核对后端脱敏日志）';
 }
 
+enum HomeConnectionState { checking, backendOffline, carOffline, online }
+
 class BackendApi {
   BackendApi({http.Client? client}) : client = client ?? http.Client();
   final http.Client client;
@@ -559,6 +561,25 @@ class BackendSession extends ChangeNotifier {
       : displayedBackendOnline == false
       ? '离线'
       : '检测中';
+  HomeConnectionState get homeConnectionState {
+    if (displayedBackendOnline == null) return HomeConnectionState.checking;
+    if (displayedBackendOnline == false) {
+      return HomeConnectionState.backendOffline;
+    }
+    final reportedDevice = playback['device_id'];
+    return heartbeatFresh &&
+            !deviceDenied &&
+            (reportedDevice == null || reportedDevice == api.deviceId)
+        ? HomeConnectionState.online
+        : HomeConnectionState.carOffline;
+  }
+
+  String get homeConnectionLabel => switch (homeConnectionState) {
+    HomeConnectionState.checking => '检测中',
+    HomeConnectionState.backendOffline => '后端未连接',
+    HomeConnectionState.carOffline => '车机未连接',
+    HomeConnectionState.online => '在线',
+  };
   DateTime? statusReceivedAt;
   DateTime? lastPongAt;
   bool foreground = true, disposed = false;
