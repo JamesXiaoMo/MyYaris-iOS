@@ -163,15 +163,24 @@ void main() {
       expect(find.text('选择短音频并上传解析'), findsNothing);
       expect(find.text('刷新任务回执'), findsNothing);
       expect(find.text('先解析候选，确认后才派发到指定车机。'), findsNothing);
-      expect(find.text('解析目的地'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('favorites-open')));
+      await tester.drag(
+        find.byKey(const ValueKey('favorites-handle')),
+        const Offset(0, -320),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('favorite-menu-fav_test')),
+      );
+      await tester.tap(find.byKey(const ValueKey('favorite-menu-fav_test')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('删除'));
       await tester.pumpAndSettle();
       expect(writes, isEmpty);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('选择目的地'));
+      await tester.tap(find.text('家'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
       await tester.pumpAndSettle();
       final field = tester.widget<TextField>(
         find.byKey(const ValueKey('destination-input')),

@@ -83,11 +83,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tab-1')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
+      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('destination-input')),
         '34,132',
       );
-      await tester.tap(find.byKey(const ValueKey('destination-preview')));
+      await tester.tap(find.widgetWithText(FilledButton, '解析目的地'));
       await tester.pumpAndSettle();
       expect(writes, ['/api/v1/destinations/resolve']);
       await tester.ensureVisible(find.text('候选二'));

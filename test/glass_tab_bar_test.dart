@@ -117,10 +117,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tab-1')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
+      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('destination-input')),
         '34.4,132.4',
       );
+      await tester.tap(find.text('取消'));
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tab-2')));
@@ -131,6 +134,8 @@ void main() {
             tester.getCenter(find.byKey(const ValueKey('tab-2'))),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
+      await tester.pumpAndSettle();
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('destination-input')))
@@ -138,6 +143,8 @@ void main() {
             .text,
         '34.4,132.4',
       );
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
       tester.view.viewInsets = const FakeViewPadding(bottom: 260);
       addTearDown(tester.view.resetViewInsets);
       await tester.pumpAndSettle();

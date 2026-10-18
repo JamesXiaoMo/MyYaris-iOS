@@ -1,3 +1,4 @@
+import MapKit
 import WebKit
 import Flutter
 import UIKit
@@ -17,6 +18,7 @@ import UniformTypeIdentifiers
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     engineBridge.applicationRegistrar.register(YarisModelFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/model")
+    engineBridge.applicationRegistrar.register(YarisMapFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/map")
     let channel = FlutterMethodChannel(name: "io.myyaris/credentials", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { call, result in
       let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -65,7 +67,7 @@ import UniformTypeIdentifiers
         if UserDefaults.standard.bool(forKey: key) { result(false) }
         else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -78,7 +80,7 @@ import UniformTypeIdentifiers
         catch { result(FlutterError(code: "SCREENSHOT_WRITE", message: "App截图保存失败", details: nil)) }
       case "saveEvidence":
         guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
-              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json"].contains(name),
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json", "map-ui-proof.json"].contains(name),
               let bytes = payload["bytes"] as? FlutterStandardTypedData,
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
           result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return
@@ -240,4 +242,66 @@ private final class YarisModelView: NSObject, FlutterPlatformView, WKScriptMessa
     web.loadHTMLString("", baseURL: nil)
   }
   deinit { web.configuration.userContentController.removeScriptMessageHandler(forName: "model") }
+}
+
+// Native MapKit viewing/picking only. No location permission or route provider.
+private final class YarisMapFactory: NSObject, FlutterPlatformViewFactory {
+  let messenger: FlutterBinaryMessenger
+  init(messenger: FlutterBinaryMessenger) { self.messenger = messenger }
+  func create(withFrame frame: CGRect, viewIdentifier id: Int64, arguments args: Any?) -> FlutterPlatformView {
+    YarisMapView(frame: frame, id: id, messenger: messenger)
+  }
+}
+private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelegate, UIGestureRecognizerDelegate {
+  private let map: MKMapView
+  private let channel: FlutterMethodChannel
+  private var released = false
+  init(frame: CGRect, id: Int64, messenger: FlutterBinaryMessenger) {
+    map = MKMapView(frame: frame)
+    channel = FlutterMethodChannel(name: "io.myyaris/map/\(id)", binaryMessenger: messenger)
+    super.init()
+    map.delegate = self
+    map.isPitchEnabled = false
+    map.showsUserLocation = false
+    map.overrideUserInterfaceStyle = .dark
+    map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 36.2, longitude: 138.25), span: MKCoordinateSpan(latitudeDelta: 14, longitudeDelta: 14)), animated: false)
+    let tap = UITapGestureRecognizer(target: self, action: #selector(picked(_:)))
+    tap.delegate = self
+    tap.cancelsTouchesInView = false
+    map.addGestureRecognizer(tap)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self, !self.released else { result(nil); return }
+      if call.method == "center", let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double {
+        let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        guard lat.isFinite, lon.isFinite, CLLocationCoordinate2DIsValid(c) else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
+        self.pin(c, title: data["title"] as? String ?? "目的地")
+        self.map.setRegion(MKCoordinateRegion(center: c, latitudinalMeters: 2000, longitudinalMeters: 2000), animated: !UIAccessibility.isReduceMotionEnabled)
+      } else if call.method == "dispose" { self.release() }
+      result(nil)
+    }
+  }
+  func view() -> UIView { map }
+  private func pin(_ c: CLLocationCoordinate2D, title: String) {
+    map.removeAnnotations(map.annotations)
+    let mark = MKPointAnnotation(); mark.coordinate = c; mark.title = title
+    map.addAnnotation(mark)
+  }
+  @objc private func picked(_ gesture: UITapGestureRecognizer) {
+    guard gesture.state == .ended, !released else { return }
+    let c = map.convert(gesture.location(in: map), toCoordinateFrom: map)
+    guard CLLocationCoordinate2DIsValid(c) else { return }
+    pin(c, title: "地图选点")
+    channel.invokeMethod("selected", arguments: ["latitude": c.latitude, "longitude": c.longitude])
+  }
+  func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
+    if !released && fullyRendered { channel.invokeMethod("ready", arguments: nil) }
+  }
+  func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: Error) {
+    if !released { channel.invokeMethod("failed", arguments: nil) }
+  }
+  private func release() {
+    guard !released else { return }; released = true
+    channel.setMethodCallHandler(nil); map.delegate = nil; map.removeAnnotations(map.annotations)
+    map.removeFromSuperview()
+  }
 }

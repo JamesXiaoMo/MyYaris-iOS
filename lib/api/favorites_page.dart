@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'backend.dart';
+import '../apple_map.dart';
 import 'favorites.dart';
 import 'pages.dart' show confirmAction;
 
@@ -191,9 +192,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
 }
 
 class FavoriteEditor extends StatefulWidget {
-  const FavoriteEditor({super.key, required this.service, this.item});
+  const FavoriteEditor({
+    super.key,
+    required this.service,
+    this.item,
+    this.initialSelection,
+  });
   final FavoritesApi service;
   final Favorite? item;
+  final MapSelection? initialSelection;
   @override
   State<FavoriteEditor> createState() => _FavoriteEditorState();
 }
@@ -202,10 +209,14 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
   late final name = TextEditingController(text: widget.item?.name);
   late final address = TextEditingController(text: widget.item?.address);
   late final latitude = TextEditingController(
-    text: widget.item?.latitude.toString(),
+    text:
+        widget.item?.latitude.toString() ??
+        widget.initialSelection?.latitude.toString(),
   );
   late final longitude = TextEditingController(
-    text: widget.item?.longitude.toString(),
+    text:
+        widget.item?.longitude.toString() ??
+        widget.initialSelection?.longitude.toString(),
   );
   bool busy = false;
   String? error;

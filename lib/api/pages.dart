@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'backend.dart';
 import 'contracts.dart';
-import 'favorites.dart';
-import 'favorites_page.dart';
 import 'login_page.dart';
 import 'liked_music_page.dart';
+import '../apple_map.dart';
+import 'driving_favorites_drawer.dart';
 
 const _muted = Color(0xFF9398A6);
 
@@ -133,8 +133,81 @@ class _NavigationPageState extends State<NavigationPage> {
   String? error;
   bool busy = false;
   String? resolveKey, dispatchKey, resolveInput;
+  MapSelection? mapSelection;
+  final drawer = DraggableScrollableController();
+  double drawerExtent = .34;
+  @override
+  void initState() {
+    super.initState();
+    drawer.addListener(() {
+      if (mounted &&
+          drawer.isAttached &&
+          (drawer.size - drawerExtent).abs() > .005) {
+        setState(() => drawerExtent = drawer.size);
+      }
+    });
+  }
+
+  void selectPoint(MapSelection point) {
+    if (busy) return;
+    setState(() {
+      mapSelection = point;
+      input.text = '${point.latitude}, ${point.longitude}';
+      resolved = null;
+      query = null;
+      error = null;
+      resolveKey = dispatchKey = resolveInput = null;
+    });
+    if (drawer.isAttached) {
+      drawer.animateTo(
+        .46,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Future<void> enterDestination() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('输入目的地'),
+        content: TextField(
+          key: const ValueKey('destination-input'),
+          controller: input,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            hintText: '坐标 / Plus Code / 地图链接 / 地址',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              resolve();
+            },
+            child: const Text('解析目的地'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && drawer.isAttached) {
+      drawer.animateTo(
+        .70,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   @override
   void dispose() {
+    drawer.dispose();
     input.dispose();
     super.dispose();
   }
@@ -301,69 +374,24 @@ class _NavigationPageState extends State<NavigationPage> {
   Widget build(BuildContext context) {
     final candidates = (query?['candidates'] as List?) ?? [];
 
-    return ListView(
-      padding: const EdgeInsets.all(22),
+    final panel = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        heading('行驶', ''),
-        card([
-          TextField(
-            key: const ValueKey('destination-input'),
-            controller: input,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: '坐标 / Plus Code / 地图链接 / 地址',
-              border: OutlineInputBorder(),
+        if (mapSelection != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              '${mapSelection!.title}\nWGS84 纬度 ${mapSelection!.latitude.toStringAsFixed(6)} · 经度 ${mapSelection!.longitude.toStringAsFixed(6)}',
             ),
           ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            key: const ValueKey('destination-preview'),
-            onPressed: busy || resolved != null ? null : resolve,
-            icon: const Icon(Icons.place_outlined),
-            label: Text(busy ? '处理中…' : '解析目的地'),
-          ),
-          if (error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                error!,
-                style: const TextStyle(color: Colors.orangeAccent),
-              ),
-            ),
-        ]),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            key: const ValueKey('favorites-open'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-            ),
-            onPressed: busy
-                ? null
-                : () async {
-                    final favorite = await Navigator.push<Favorite>(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => FavoritesPage(api: widget.session.api),
-                      ),
-                    );
-                    if (favorite == null || !mounted) return;
-                    setState(() {
-                      input.text = favorite.coordinates;
-                      resolved = null;
-                      query = null;
-                      error = null;
-                      resolveKey = null;
-                      dispatchKey = null;
-                      resolveInput = null;
-                    });
-                  },
-            icon: const Icon(Icons.bookmarks_outlined),
-            label: const Text('收藏夹', style: TextStyle(fontSize: 20)),
-          ),
+        FilledButton.icon(
+          key: const ValueKey('destination-preview'),
+          onPressed: busy || resolved != null ? null : resolve,
+          icon: const Icon(Icons.place_outlined),
+          label: Text(busy ? '处理中…' : '解析目的地'),
         ),
-        const SizedBox(height: 16),
+        if (error != null)
+          Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
         if (resolved != null)
           card([
             const Text(
@@ -428,6 +456,60 @@ class _NavigationPageState extends State<NavigationPage> {
               ),
             ],
           ),
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: Text(
+            '行驶',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              children: [
+                Positioned.fill(
+                  bottom: constraints.maxHeight * drawerExtent,
+                  child: AppleMap(
+                    selection: mapSelection,
+                    onSelected: selectPoint,
+                  ),
+                ),
+                DraggableScrollableSheet(
+                  controller: drawer,
+                  minChildSize: .22,
+                  initialChildSize: .34,
+                  maxChildSize: .86,
+                  snap: true,
+                  snapSizes: const [.22, .34, .70, .86],
+                  builder: (context, scroll) => DrivingFavoritesDrawer(
+                    session: widget.session,
+                    controller: scroll,
+                    selection: mapSelection,
+                    destinationPanel:
+                        (mapSelection != null ||
+                            input.text.trim().isNotEmpty ||
+                            resolved != null)
+                        ? panel
+                        : const SizedBox.shrink(),
+                    onInput: enterDestination,
+                    onSelected: (favorite) => selectPoint(
+                      MapSelection(
+                        favorite.latitude,
+                        favorite.longitude,
+                        title: favorite.displayName,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
