@@ -206,8 +206,12 @@ class FavoriteEditor extends StatefulWidget {
 }
 
 class _FavoriteEditorState extends State<FavoriteEditor> {
-  late final name = TextEditingController(text: widget.item?.name);
-  late final address = TextEditingController(text: widget.item?.address);
+  late final name = TextEditingController(
+    text: widget.item?.name ?? widget.initialSelection?.title,
+  );
+  late final address = TextEditingController(
+    text: widget.item?.address ?? widget.initialSelection?.address,
+  );
   late final latitude = TextEditingController(
     text:
         widget.item?.latitude.toString() ??

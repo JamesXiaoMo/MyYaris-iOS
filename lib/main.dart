@@ -190,7 +190,7 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                     onDemo: (label) =>
                         _command(label == '上一曲' ? 'prev' : 'next'),
                   ),
-                  NavigationPage(session: session),
+                  NavigationPage(session: session, active: _index == 1),
                   MusicPage(session: session),
                   SettingsPage(session: session),
                 ],

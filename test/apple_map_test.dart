@@ -13,6 +13,7 @@ void main() {
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final messenger = tester.binding.defaultBinaryMessenger;
       String? name;
+      bool denyLocation = false;
       final nativeCalls = <MethodCall>[], picked = <MapSelection>[];
       messenger.setMockMethodCallHandler(
         const MethodChannel('flutter/platform_views'),
@@ -21,7 +22,15 @@ void main() {
             name = 'io.myyaris/map/${(call.arguments as Map)['id']}';
             messenger.setMockMethodCallHandler(MethodChannel(name!), (c) async {
               nativeCalls.add(c);
-              return null;
+              if (c.method == 'locate' && denyLocation) {
+                throw PlatformException(
+                  code: 'LOCATION_DENIED',
+                  message: '定位未授权',
+                );
+              }
+              return c.method == 'locate'
+                  ? {'status': 'located', 'approximate': false}
+                  : null;
             });
           }
           return null;
@@ -45,7 +54,16 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(nativeCalls.single.method, 'center');
+      expect(
+        nativeCalls.map((c) => c.method),
+        containsAll(['center', 'setActive', 'locate']),
+      );
+      expect(picked, isEmpty);
+      denyLocation = true;
+      await tester.tap(find.byKey(const ValueKey('map-locate')));
+      await tester.pump();
+      expect(find.text('定位未授权'), findsOneWidget);
+      expect(picked, isEmpty);
       Future<void> event(String method, Object? value) async {
         final done = Completer<void>();
         messenger.handlePlatformMessage(
@@ -73,7 +91,10 @@ void main() {
       expect(nativeCalls.last.method, 'dispose');
       debugDefaultTargetPlatformOverride = null;
       expect(
-        nativeCalls.every((c) => {'center', 'dispose'}.contains(c.method)),
+        nativeCalls.every(
+          (c) =>
+              {'center', 'setActive', 'locate', 'dispose'}.contains(c.method),
+        ),
         true,
       );
     },

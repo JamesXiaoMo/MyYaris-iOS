@@ -1,3 +1,4 @@
+import CoreLocation
 import MapKit
 import WebKit
 import Flutter
@@ -67,7 +68,7 @@ import UniformTypeIdentifiers
         if UserDefaults.standard.bool(forKey: key) { result(false) }
         else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png", "map-search-device.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -244,7 +245,7 @@ private final class YarisModelView: NSObject, FlutterPlatformView, WKScriptMessa
   deinit { web.configuration.userContentController.removeScriptMessageHandler(forName: "model") }
 }
 
-// Native MapKit viewing/picking only. No location permission or route provider.
+// Native MapKit viewing/search and foreground location only; no route provider.
 private final class YarisMapFactory: NSObject, FlutterPlatformViewFactory {
   let messenger: FlutterBinaryMessenger
   init(messenger: FlutterBinaryMessenger) { self.messenger = messenger }
@@ -252,45 +253,153 @@ private final class YarisMapFactory: NSObject, FlutterPlatformViewFactory {
     YarisMapView(frame: frame, id: id, messenger: messenger)
   }
 }
-private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelegate, UIGestureRecognizerDelegate {
+private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
   private let map: MKMapView
   private let channel: FlutterMethodChannel
-  private var released = false
+  private let locator = CLLocationManager()
+  private var released = false, active = false, locating = false
+  private var cameraEpoch = 0, locateEpoch = 0, searchEpoch = 0
+  private var locationResult: FlutterResult?
+  private var locationTimer: Timer?
+  private var searchResult: FlutterResult?
+  private var search: MKLocalSearch?
   init(frame: CGRect, id: Int64, messenger: FlutterBinaryMessenger) {
     map = MKMapView(frame: frame)
     channel = FlutterMethodChannel(name: "io.myyaris/map/\(id)", binaryMessenger: messenger)
     super.init()
     map.delegate = self
+    locator.delegate = self
+    locator.desiredAccuracy = kCLLocationAccuracyHundredMeters
     map.isPitchEnabled = false
     map.showsUserLocation = false
     map.overrideUserInterfaceStyle = .dark
+    // The map extends beneath the drawer's transparent top corners. Keep
+    // Apple's attribution above that 24pt overlap, not under the drawer.
+    map.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 36, right: 8)
     map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 36.2, longitude: 138.25), span: MKCoordinateSpan(latitudeDelta: 14, longitudeDelta: 14)), animated: false)
     let tap = UITapGestureRecognizer(target: self, action: #selector(picked(_:)))
-    tap.delegate = self
-    tap.cancelsTouchesInView = false
-    map.addGestureRecognizer(tap)
+    tap.delegate = self; tap.cancelsTouchesInView = false; map.addGestureRecognizer(tap)
+    let pan = UIPanGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
+    pan.delegate = self; pan.cancelsTouchesInView = false; map.addGestureRecognizer(pan)
+    let pinch = UIPinchGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
+    pinch.delegate = self; pinch.cancelsTouchesInView = false; map.addGestureRecognizer(pinch)
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self = self, !self.released else { result(nil); return }
-      if call.method == "center", let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double {
+      switch call.method {
+      case "center":
+        guard let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
         let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         guard lat.isFinite, lon.isFinite, CLLocationCoordinate2DIsValid(c) else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
+        self.cameraEpoch += 1
         self.pin(c, title: data["title"] as? String ?? "目的地")
         self.map.setRegion(MKCoordinateRegion(center: c, latitudinalMeters: 2000, longitudinalMeters: 2000), animated: !UIAccessibility.isReduceMotionEnabled)
-      } else if call.method == "dispose" { self.release() }
-      result(nil)
+        result(nil)
+      case "setActive":
+        self.active = (call.arguments as? Bool) == true
+        self.map.showsUserLocation = self.active && self.locationAuthorized
+        if UIApplication.shared.applicationState == .background {
+          self.finishLocation(error: FlutterError(code: "CANCELLED", message: "定位已暂停", details: nil))
+        }
+        result(nil)
+      case "locate": self.beginLocation(result)
+      case "search": self.startSearch(call.arguments as? String ?? "", result: result)
+      case "cancelSearch": self.cancelSearch(); result(nil)
+      case "dispose": self.release(); result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
     }
+  }
+  private var locationAuthorized: Bool {
+    [.authorizedAlways, .authorizedWhenInUse].contains(locator.authorizationStatus)
+  }
+  private func beginLocation(_ result: @escaping FlutterResult) {
+    guard UIApplication.shared.applicationState == .active else { result(FlutterError(code: "CANCELLED", message: "请在前台使用定位", details: nil)); return }
+    guard locationResult == nil else { result(FlutterError(code: "LOCATION_BUSY", message: "正在定位，请稍候", details: nil)); return }
+    cameraEpoch += 1; locateEpoch = cameraEpoch
+    locationResult = result
+    if locator.authorizationStatus == .notDetermined {
+      locator.requestWhenInUseAuthorization()
+    } else { continueLocation() }
+  }
+  private func continueLocation() {
+    guard locationResult != nil else { return }
+    guard locationAuthorized else {
+      finishLocation(error: FlutterError(code: "LOCATION_DENIED", message: "定位未授权，可在系统设置中允许定位；仍可手动搜索地图", details: nil)); return
+    }
+    guard !locating else { return }; locating = true
+    map.showsUserLocation = active
+    locationTimer?.invalidate()
+    locationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
+      self?.finishLocation(error: FlutterError(code: "LOCATION_TIMEOUT", message: "定位超时，可重试或手动浏览地图", details: nil))
+    }
+    locator.requestLocation()
+  }
+  func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    guard !released else { return }
+    map.showsUserLocation = active && locationAuthorized
+    if locationResult != nil && manager.authorizationStatus != .notDetermined { continueLocation() }
+  }
+  func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    guard locationResult != nil, !released else { return }
+    guard let location = locations.last, location.horizontalAccuracy >= 0,
+          abs(location.timestamp.timeIntervalSinceNow) < 60,
+          CLLocationCoordinate2DIsValid(location.coordinate) else { return }
+    if locateEpoch == cameraEpoch {
+      map.setRegion(MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1800, longitudinalMeters: 1800), animated: !UIAccessibility.isReduceMotionEnabled)
+    }
+    let callback = locationResult
+    locationResult = nil; locating = false; locationTimer?.invalidate(); locationTimer = nil; locator.stopUpdatingLocation()
+    callback?(["status": "located", "approximate": manager.accuracyAuthorization == .reducedAccuracy])
+  }
+  func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    finishLocation(error: FlutterError(code: "LOCATION_UNAVAILABLE", message: "暂时无法定位，请检查系统定位服务后重试", details: nil))
+  }
+  private func finishLocation(error: FlutterError) {
+    let callback = locationResult; locationResult = nil; locating = false
+    locationTimer?.invalidate(); locationTimer = nil; locator.stopUpdatingLocation()
+    callback?(error)
+  }
+  private func startSearch(_ text: String, result: @escaping FlutterResult) {
+    let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty, query.count <= 100 else { result(FlutterError(code: "SEARCH_QUERY", message: "请输入1～100字的地点或地址", details: nil)); return }
+    cancelSearch(); let epoch = searchEpoch
+    let request = MKLocalSearch.Request()
+    request.naturalLanguageQuery = query; request.region = map.region
+    request.resultTypes = [.address, .pointOfInterest]
+    let current = MKLocalSearch(request: request)
+    search = current; searchResult = result
+    current.start { [weak self] response, error in
+      guard let self = self, !self.released, epoch == self.searchEpoch else { return }
+      let callback = self.searchResult; self.searchResult = nil; self.search = nil
+      if error != nil { callback?(FlutterError(code: "SEARCH_FAILED", message: "Apple地图地点搜索失败，请检查网络后重试", details: nil)); return }
+      let items = (response?.mapItems ?? []).prefix(20).compactMap { item -> [String: Any]? in
+        let c = item.placemark.coordinate
+        guard CLLocationCoordinate2DIsValid(c) else { return nil }
+        return ["title": item.name ?? query, "address": item.placemark.title ?? "", "latitude": c.latitude, "longitude": c.longitude]
+      }
+      callback?(["results": items])
+    }
+  }
+  private func cancelSearch() {
+    searchEpoch += 1; search?.cancel(); search = nil
+    let callback = searchResult; searchResult = nil
+    callback?(FlutterError(code: "CANCELLED", message: "搜索已取消", details: nil))
   }
   func view() -> UIView { map }
   private func pin(_ c: CLLocationCoordinate2D, title: String) {
-    map.removeAnnotations(map.annotations)
+    map.removeAnnotations(map.annotations.filter { !($0 is MKUserLocation) })
     let mark = MKPointAnnotation(); mark.coordinate = c; mark.title = title
     map.addAnnotation(mark)
   }
+  @objc private func cameraGesture(_ gesture: UIGestureRecognizer) {
+    if gesture.state == .began { cameraEpoch += 1 }
+  }
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
   @objc private func picked(_ gesture: UITapGestureRecognizer) {
     guard gesture.state == .ended, !released else { return }
     let c = map.convert(gesture.location(in: map), toCoordinateFrom: map)
     guard CLLocationCoordinate2DIsValid(c) else { return }
-    pin(c, title: "地图选点")
+    cameraEpoch += 1; pin(c, title: "地图选点")
     channel.invokeMethod("selected", arguments: ["latitude": c.latitude, "longitude": c.longitude])
   }
   func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
@@ -301,6 +410,8 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
   }
   private func release() {
     guard !released else { return }; released = true
+    cancelSearch(); finishLocation(error: FlutterError(code: "CANCELLED", message: "地图已关闭", details: nil))
+    map.showsUserLocation = false; locator.delegate = nil
     channel.setMethodCallHandler(nil); map.delegate = nil; map.removeAnnotations(map.annotations)
     map.removeFromSuperview()
   }

@@ -7,6 +7,7 @@ import 'contracts.dart';
 import 'login_page.dart';
 import 'liked_music_page.dart';
 import '../apple_map.dart';
+import '../map_search_page.dart';
 import 'driving_favorites_drawer.dart';
 
 const _muted = Color(0xFF9398A6);
@@ -121,7 +122,8 @@ Widget heading(String title, String subtitle) => Padding(
 );
 
 class NavigationPage extends StatefulWidget {
-  const NavigationPage({super.key, required this.session});
+  const NavigationPage({super.key, required this.session, this.active = true});
+  final bool active;
   final BackendSession session;
   @override
   State<NavigationPage> createState() => _NavigationPageState();
@@ -134,6 +136,7 @@ class _NavigationPageState extends State<NavigationPage> {
   bool busy = false;
   String? resolveKey, dispatchKey, resolveInput;
   MapSelection? mapSelection;
+  final mapController = AppleMapController();
   final drawer = DraggableScrollableController();
   double drawerExtent = .34;
   @override
@@ -165,6 +168,23 @@ class _NavigationPageState extends State<NavigationPage> {
         curve: Curves.easeOut,
       );
     }
+  }
+
+  Future<void> searchMap() async {
+    final token = widget.session.api.token;
+    final origin = widget.session.api.baseUrl;
+    final point = await Navigator.push<MapSelection>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapSearchPage(controller: mapController),
+      ),
+    );
+    if (!mounted ||
+        token != widget.session.api.token ||
+        origin != widget.session.api.baseUrl) {
+      return;
+    }
+    if (point != null) selectPoint(point);
   }
 
   Future<void> enterDestination() async {
@@ -461,11 +481,23 @@ class _NavigationPageState extends State<NavigationPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: Text(
-            '行驶',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '行驶',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('map-search-open'),
+                tooltip: '搜索地图地点',
+                onPressed: busy ? null : searchMap,
+                icon: const Icon(Icons.search),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -473,8 +505,13 @@ class _NavigationPageState extends State<NavigationPage> {
             builder: (context, constraints) => Stack(
               children: [
                 Positioned.fill(
-                  bottom: constraints.maxHeight * drawerExtent,
+                  bottom: (constraints.maxHeight * drawerExtent - 24).clamp(
+                    0.0,
+                    constraints.maxHeight,
+                  ),
                   child: AppleMap(
+                    controller: mapController,
+                    active: widget.active,
                     selection: mapSelection,
                     onSelected: selectPoint,
                   ),

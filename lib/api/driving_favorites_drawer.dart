@@ -131,7 +131,7 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
         .toList();
     return Material(
       color: const Color(0xFF141B26),
-      elevation: 12,
+      elevation: 0,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       clipBehavior: Clip.antiAlias,
       child: ListView(
@@ -212,10 +212,6 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
                 icon: const Icon(Icons.refresh),
               ),
             ],
-          ),
-          const Text(
-            '选择只标记位置；解析、确认后才发送车机',
-            style: TextStyle(color: Colors.white54, fontSize: 12),
           ),
           widget.destinationPanel,
           if (busy) const LinearProgressIndicator(),
