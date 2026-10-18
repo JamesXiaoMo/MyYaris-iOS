@@ -502,12 +502,14 @@ class BackendSession extends ChangeNotifier {
     CredentialStore? store,
     CredentialStore? authStore,
     CredentialStore? settingsStore,
+    CredentialStore? navigationStore,
     this.requireUserLogin = true,
     this.webSocketConnector,
   }) : api = api ?? BackendApi(),
        store = store ?? KeychainStore(),
        authStore = authStore ?? ScopedKeychainStore('UserSession'),
-       settingsStore = settingsStore ?? ScopedKeychainStore('Connection') {
+       settingsStore = settingsStore ?? ScopedKeychainStore('Connection'),
+       navigationStore = navigationStore ?? ScopedKeychainStore('Navigation') {
     this.api.onSessionExpired = expireSession;
     this.api.onDeviceForbidden = (path) {
       if (path.endsWith('/music/control/command') &&
@@ -527,7 +529,7 @@ class BackendSession extends ChangeNotifier {
   final bool requireUserLogin;
   final Future<WebSocket> Function(Uri, Map<String, String>)?
   webSocketConnector;
-  final CredentialStore authStore, settingsStore;
+  final CredentialStore authStore, settingsStore, navigationStore;
   bool authInitialized = false,
       restoringSession = false,
       authBusy = false,
@@ -655,7 +657,10 @@ class BackendSession extends ChangeNotifier {
           }
         }
       }
-      if (authenticated) start();
+      if (authenticated) {
+        await restoreNavigation();
+        start();
+      }
     } catch (e) {
       authenticated = false;
       authMessage = e is ApiFailure ? e.message : '无法恢复会话，请保持手机解锁并重试';
@@ -700,6 +705,12 @@ class BackendSession extends ChangeNotifier {
     deviceDenied = false;
     playback = {};
     lastTask = {};
+    navigationDisplayTitle = null;
+    navigationVerified = false;
+    _metadataRequest = null;
+    _metadataRequestKey = null;
+    _metadataFailedId = null;
+    _metadataRetryAt = null;
     currentTrack = {};
     knownTracks.clear();
     issuedCommands.clear();
@@ -780,6 +791,7 @@ class BackendSession extends ChangeNotifier {
       sessionExpires = record.expires;
       authenticated = true;
       deviceDenied = false;
+      await restoreNavigation();
       scheduleSessionExpiry();
     } catch (e) {
       if (record != null) {
@@ -903,6 +915,12 @@ class BackendSession extends ChangeNotifier {
     api.deviceId = device.trim();
     playback = {};
     lastTask = {};
+    navigationDisplayTitle = null;
+    navigationVerified = false;
+    _metadataRequest = null;
+    _metadataRequestKey = null;
+    _metadataFailedId = null;
+    _metadataRetryAt = null;
     currentTrack = {};
     knownTracks.clear();
     issuedCommands.clear();
@@ -930,6 +948,12 @@ class BackendSession extends ChangeNotifier {
     lastCommandState = {};
     playback = {};
     lastTask = {};
+    navigationDisplayTitle = null;
+    navigationVerified = false;
+    _metadataRequest = null;
+    _metadataRequestKey = null;
+    _metadataFailedId = null;
+    _metadataRetryAt = null;
     currentTrack = {};
     health = {};
     statusReceivedAt = null;
@@ -1013,6 +1037,219 @@ class BackendSession extends ChangeNotifier {
     }
   }
 
+  String get _navigationOwner =>
+      requireUserLogin ? '${userProfile['id'] ?? ''}' : 'legacy-device';
+  String? navigationDisplayTitle;
+  bool navigationVerified = false;
+  String? _metadataRequest;
+  String? _metadataFailedId;
+  DateTime? _metadataRetryAt;
+
+  Future<void> acceptNavigationTask(
+    Map<String, dynamic> task, {
+    String? displayTitle,
+  }) async {
+    if (task['task_id'] is! String ||
+        task['device_id'] != null &&
+            !MusicContract.sameDevice(task['device_id'], api.deviceId)) {
+      return;
+    }
+    lastTask = Map.of(task);
+    navigationDisplayTitle = displayTitle?.trim().isNotEmpty == true
+        ? displayTitle!.trim()
+        : null;
+    navigationVerified = true;
+    publish();
+    final owner = _navigationOwner;
+    if (owner.isEmpty) return;
+    try {
+      await navigationStore.save(
+        jsonEncode({
+          'base': api.baseUrl,
+          'device': api.deviceId,
+          'owner': owner,
+          'task_id': task['task_id'],
+          'display_title': navigationDisplayTitle,
+        }),
+      );
+    } catch (_) {
+      lastMessage = '目的地已提交，本机任务引用未能保存；重启后可能无法恢复';
+      publish();
+    }
+  }
+
+  Future<void> restoreNavigation() async {
+    final gen = generation,
+        owner = _navigationOwner,
+        base = api.baseUrl,
+        device = api.deviceId;
+    try {
+      final raw = await navigationStore.load();
+      if (raw == null ||
+          gen != generation ||
+          owner != _navigationOwner ||
+          base != api.baseUrl ||
+          device != api.deviceId) {
+        return;
+      }
+      final record = jsonDecode(raw) as Map;
+      if (record['owner'] != owner ||
+          record['base'] != base ||
+          record['device'] != device ||
+          record['task_id'] is! String) {
+        return;
+      }
+      lastTask = {'task_id': record['task_id']};
+      navigationDisplayTitle = record['display_title'] is String
+          ? record['display_title']
+          : null;
+      navigationVerified = false;
+      await refreshNavigationTask();
+    } catch (_) {
+      // A missing private reference never prevents login or resets credentials.
+    }
+  }
+
+  Future<void> refreshNavigationTask() async {
+    final id = lastTask['task_id'];
+    if (id == null) return;
+    final gen = generation,
+        token = api.token,
+        base = api.baseUrl,
+        device = api.deviceId;
+    try {
+      final task = await api.call(
+        'GET',
+        '/tasks/${Uri.encodeComponent('$id')}',
+      );
+      if (gen != generation ||
+          token != api.token ||
+          base != api.baseUrl ||
+          device != api.deviceId ||
+          lastTask['task_id'] != id) {
+        return;
+      }
+      if (task['task_id'] != id ||
+          task['device_id'] != null &&
+              !MusicContract.sameDevice(task['device_id'], device)) {
+        return;
+      }
+      lastTask = task;
+      navigationVerified = true;
+    } catch (e) {
+      if (gen != generation ||
+          token != api.token ||
+          base != api.baseUrl ||
+          device != api.deviceId) {
+        return;
+      }
+      navigationVerified = false;
+      if (e is ApiFailure && {403, 404}.contains(e.statusCode)) {
+        lastTask = {};
+        navigationDisplayTitle = null;
+      }
+      lastMessage = '任务状态暂未更新，请刷新后核对';
+    }
+    publish();
+  }
+
+  Future<void> syncCurrentTrack() async {
+    final id = '${playback['current_track_id'] ?? ''}';
+    if (id.isEmpty) {
+      currentTrack = {};
+      return;
+    }
+    if (knownTracks.containsKey(id)) {
+      currentTrack = knownTracks[id]!;
+      return;
+    }
+    if (currentTrack['track_id'] != id) currentTrack = {'track_id': id};
+    if (currentTrack['metadata_loaded'] == true ||
+        _metadataRequest == id ||
+        _metadataFailedId == id &&
+            _metadataRetryAt != null &&
+            DateTime.now().isBefore(_metadataRetryAt!)) {
+      return;
+    }
+    final gen = generation,
+        token = api.token,
+        base = api.baseUrl,
+        device = api.deviceId;
+    final request = '$gen|$id|${DateTime.now().microsecondsSinceEpoch}';
+    _metadataRequest = id;
+    _metadataRequestKey = request;
+    try {
+      final data = await api.call(
+        'GET',
+        '/api/v1/music/tracks/${Uri.encodeComponent(id)}',
+      );
+      if (gen != generation ||
+          token != api.token ||
+          base != api.baseUrl ||
+          device != api.deviceId ||
+          playback['current_track_id'] != id) {
+        return;
+      }
+      if (data['track_id'] != id) throw ApiFailure('曲目信息与车机状态不匹配');
+      currentTrack = {...data, 'metadata_loaded': true};
+      _metadataFailedId = null;
+      _metadataRetryAt = null;
+    } catch (_) {
+      if (gen == generation &&
+          token == api.token &&
+          base == api.baseUrl &&
+          device == api.deviceId &&
+          playback['current_track_id'] == id) {
+        currentTrack = {'track_id': id};
+        _metadataFailedId = id;
+        _metadataRetryAt = DateTime.now().add(const Duration(seconds: 15));
+      }
+    } finally {
+      if (_metadataRequestKey == request) {
+        _metadataRequest = null;
+        _metadataRequestKey = null;
+      }
+      if (!disposed) publish();
+    }
+  }
+
+  String? _metadataRequestKey;
+
+  String get homeDestinationTitle => lastTask.isEmpty
+      ? '暂无目的地'
+      : navigationDisplayTitle ?? _nonempty(lastTask['title']) ?? '目的地名称待同步';
+  String get homeDestinationDetail => lastTask.isEmpty
+      ? '尚无本机确认的导航任务'
+      : _nonempty(lastTask['address']) ?? '上次确认发送的目的地';
+  String get homeMusicTitle =>
+      _nonempty(currentTrack['title']) ??
+      (playback['current_track_id'] == null ||
+              playback['current_track_id'] == ''
+          ? '暂无曲目'
+          : '曲名暂不可用');
+  String get homeMusicDetail => [
+    if (_nonempty(currentTrack['artist']) != null)
+      _nonempty(currentTrack['artist'])!,
+    if (playback['position_ms'] is num) _clock(playback['position_ms']),
+    if (playback['duration_ms'] is num && (playback['duration_ms'] as num) > 0)
+      '/ ${_clock(playback['duration_ms'])}',
+  ].join(' ').trim();
+  String get homeMusicState => !heartbeatFresh || playbackStale
+      ? '状态待更新'
+      : switch (playback['playback_state']) {
+          'playing' => '正在播放',
+          'paused' => '已暂停',
+          'stopped' => '已停止',
+          'buffering' => '缓冲中',
+          _ => '状态未知',
+        };
+  static String? _nonempty(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
+  static String _clock(dynamic value) {
+    final seconds = ((value as num).toInt().clamp(0, 1 << 40) ~/ 1000);
+    return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+
   Future<void> refresh() async {
     if (refreshing || !foreground || !api.configured || disposed) return;
     refreshing = true;
@@ -1051,43 +1288,16 @@ class BackendSession extends ChangeNotifier {
       connection = '后端可达';
       verifyLog('HTTP_STATE_RECEIVED');
       statusReceivedAt = DateTime.now();
-      final track = '${playback['current_track_id'] ?? ''}';
-      if (track.isEmpty) currentTrack = {};
-      if (track.isNotEmpty &&
-          currentTrack['track_id'] != track &&
-          knownTracks.containsKey(track)) {
-        currentTrack = knownTracks[track]!;
-      }
-      if (track.isNotEmpty && currentTrack['track_id'] != track) {
-        try {
-          final t = await api.call(
-            'GET',
-            '/api/v1/music/tracks/${Uri.encodeComponent(track)}',
-          );
-          if (gen == generation) currentTrack = t;
-        } catch (_) {
-          if (gen == generation) {
-            currentTrack = {'track_id': track, 'title': track};
-          }
-        }
-      }
-      if (lastTask['task_id'] != null) {
-        try {
-          final task = await api.call(
-            'GET',
-            '/tasks/${Uri.encodeComponent('${lastTask['task_id']}')}',
-          );
-          if (gen == generation) lastTask = task;
-        } catch (e) {
-          if (gen == generation) lastMessage = '任务状态暂未更新：$e';
-        }
-      }
+      await syncCurrentTrack();
     } catch (e) {
       if (gen == generation) {
         connection = '连接异常';
         lastMessage = e.toString();
       }
     } finally {
+      if (gen == generation && backendOnline == true && !disposed) {
+        await refreshNavigationTask();
+      }
       refreshing = false;
       publish();
     }
@@ -1309,14 +1519,7 @@ class BackendSession extends ChangeNotifier {
         }
         playback = {...playback, ...data};
         verifyLog('WSS_STATE_RECEIVED');
-        final id = '${playback['current_track_id'] ?? ''}';
-        if (id.isEmpty) {
-          currentTrack = {};
-        } else if (knownTracks.containsKey(id)) {
-          currentTrack = knownTracks[id]!;
-        } else if (currentTrack['track_id'] != id) {
-          currentTrack = {'track_id': id, 'title': id};
-        }
+        unawaited(syncCurrentTrack());
         statusReceivedAt = DateTime.now();
         publish();
       }

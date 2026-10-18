@@ -122,12 +122,12 @@ class _GlassTabBarState extends State<GlassTabBar>
             borderRadius: BorderRadius.circular(36),
             child: BackdropFilter(
               enabled: !solid,
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: solid
                       ? const Color(0xFF202631)
-                      : const Color(0xC4202631),
+                      : const Color(0x18202631),
                   borderRadius: BorderRadius.circular(36),
                   border: Border.all(color: const Color(0x35FFFFFF)),
                   gradient: solid
@@ -135,7 +135,7 @@ class _GlassTabBarState extends State<GlassTabBar>
                       : const LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [Color(0xDE30394A), Color(0xC0161C27)],
+                          colors: [Color(0x303F4B5F), Color(0x10161C27)],
                         ),
                 ),
                 child: LayoutBuilder(
@@ -197,8 +197,8 @@ class _GlassTabBarState extends State<GlassTabBar>
                                                 Color(0xFF4A5669),
                                               ]
                                             : const [
-                                                Color(0x668DABCD),
-                                                Color(0x254F6889),
+                                                Color(0x409DB8D8),
+                                                Color(0x184F6889),
                                               ],
                                       ),
                                     ),

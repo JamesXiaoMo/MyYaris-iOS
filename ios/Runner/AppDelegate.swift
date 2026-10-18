@@ -31,9 +31,9 @@ import UniformTypeIdentifiers
       case "accessibilityFlags":
         result(["reduceTransparency": UIAccessibility.isReduceTransparencyEnabled,
                 "reduceMotion": UIAccessibility.isReduceMotionEnabled])
-      case "loadUserSession", "saveUserSession", "clearUserSession", "loadConnection", "saveConnection", "clearConnection":
+      case "loadUserSession", "saveUserSession", "clearUserSession", "loadConnection", "saveConnection", "clearConnection", "loadNavigation", "saveNavigation", "clearNavigation":
         var scoped = query
-        scoped[kSecAttrAccount as String] = call.method.hasSuffix("UserSession") ? "user-session-v1" : "connection-settings-v1"
+        scoped[kSecAttrAccount as String] = call.method.hasSuffix("UserSession") ? "user-session-v1" : call.method.hasSuffix("Navigation") ? "navigation-reference-v1" : "connection-settings-v1"
         if call.method.hasPrefix("load") {
           scoped[kSecReturnData as String] = true; scoped[kSecMatchLimit as String] = kSecMatchLimitOne
           var item: CFTypeRef?; let status = SecItemCopyMatching(scoped as CFDictionary, &item)

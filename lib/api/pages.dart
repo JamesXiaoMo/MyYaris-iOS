@@ -365,8 +365,7 @@ class _NavigationPageState extends State<NavigationPage> {
         'GET',
         '/tasks/${Uri.encodeComponent('${q['task_id']}')}',
       );
-      widget.session.lastTask = task;
-      widget.session.publish();
+      await widget.session.acceptNavigationTask(task);
     }
   }
 
@@ -382,6 +381,9 @@ class _NavigationPageState extends State<NavigationPage> {
     if (!mounted) return;
     setState(() => busy = true);
     try {
+      final token = widget.session.api.token;
+      final origin = widget.session.api.baseUrl;
+      final device = widget.session.api.deviceId;
       final id = '${resolved!['destination_id'] ?? resolved!['request_id']}';
       final result = await widget.session.api.dispatchDestination(
         id,
@@ -389,8 +391,25 @@ class _NavigationPageState extends State<NavigationPage> {
         dispatchKey ??= requestId(),
         singleCandidate: ((query?['candidates'] as List?) ?? []).length == 1,
       );
-      widget.session.lastTask = result;
-      widget.session.publish();
+      if (!mounted ||
+          token != widget.session.api.token ||
+          origin != widget.session.api.baseUrl ||
+          device != widget.session.api.deviceId) {
+        return;
+      }
+      final point = mapSelection;
+      final matchesPoint =
+          point != null &&
+          input.text.trim() == '${point.latitude}, ${point.longitude}' &&
+          result['latitude'] is num &&
+          result['longitude'] is num &&
+          ((result['latitude'] as num) - point.latitude).abs() < .00001 &&
+          ((result['longitude'] as num) - point.longitude).abs() < .00001 &&
+          point.title != '地图选点';
+      await widget.session.acceptNavigationTask(
+        result,
+        displayTitle: matchesPoint ? point.title : null,
+      );
       if (mounted) {
         setState(() {
           resolved = null;
@@ -626,7 +645,9 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
       ..baseUrl = widget.session.api.baseUrl
       ..token = widget.session.api.token
       ..isUserSession = widget.session.api.isUserSession
-      ..onSessionExpired = () async { if (who == identity) await widget.session.api.onSessionExpired?.call(); };
+      ..onSessionExpired = () async {
+        if (who == identity) await widget.session.api.onSessionExpired?.call();
+      };
     setState(() {
       busy = true;
       error = null;

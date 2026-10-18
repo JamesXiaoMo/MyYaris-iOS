@@ -382,23 +382,27 @@ class _HomePage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            navigation
-                ? '${session.lastTask['title'] ?? '暂无目的地'}'
-                : '${session.currentTrack['title'] ?? session.playback['current_track_id'] ?? '暂无曲目'}',
+            navigation ? session.homeDestinationTitle : session.homeMusicTitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 5),
           Text(
             navigation
-                ? '最近提交的导航任务'
-                : '${session.currentTrack['artist'] ?? '车机状态回报'}',
+                ? session.homeDestinationDetail
+                : session.homeMusicDetail.isEmpty
+                ? '车机上报曲目'
+                : session.homeMusicDetail,
             style: const TextStyle(color: _muted, fontSize: 11),
           ),
           const SizedBox(height: 9),
           _badge(
             navigation
-                ? session.taskLabel
-                : '${session.playback['playback_state'] ?? '状态未知'}',
+                ? session.lastTask.isNotEmpty && !session.navigationVerified
+                      ? '状态待核对'
+                      : session.taskLabel
+                : session.homeMusicState,
             color,
             icon: navigation ? Icons.circle : CupertinoIcons.music_note,
             iconSize: 9,
