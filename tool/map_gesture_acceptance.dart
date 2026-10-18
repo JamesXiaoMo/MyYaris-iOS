@@ -26,7 +26,7 @@ Future<void> main() async {
   app.main();
   await Future<void>.delayed(const Duration(seconds: 6));
   final proof = <String, dynamic>{
-    'version': '0.4.3+15',
+    'version': '0.4.4+16',
     'business_commands_sent': false,
     'synthetic_native_gestures': false,
   };
@@ -59,7 +59,7 @@ Future<void> main() async {
         duration: Duration(seconds: 8),
       ),
     );
-    for (var i = 0; i < 20; i++) {
+    for (var i = 0; i < 40; i++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       proof['sample_at_utc'] = DateTime.now().toUtc().toIso8601String();
       proof['samples'] = i + 1;

@@ -19,7 +19,9 @@ import UniformTypeIdentifiers
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     engineBridge.applicationRegistrar.register(YarisModelFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/model")
-    engineBridge.applicationRegistrar.register(YarisMapFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/map")
+    // Preserve complete native touch sequences. The default eager blocker can
+    // strand embedded MapKit gestures after a Flutter overlay is touched.
+    engineBridge.applicationRegistrar.register(YarisMapFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/map", gestureRecognizersBlockingPolicy: FlutterPlatformViewGestureRecognizersBlockingPolicyWaitUntilTouchesEnded)
     let channel = FlutterMethodChannel(name: "io.myyaris/credentials", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { call, result in
       let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -299,7 +301,7 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
         }
         result(nil)
       case "diagnostics":
-        result(["interacting": self.interacting, "selections": self.selectedCount, "regions": self.regionChanges, "centers": self.centeredCount, "touch_sequences": self.touchSequences, "scroll_enabled": self.map.isScrollEnabled, "zoom_enabled": self.map.isZoomEnabled])
+        result(["blocking_policy": "waitUntilTouchesEnded", "gesture_chain": self.gestureDiagnostics(), "interacting": self.interacting, "selections": self.selectedCount, "regions": self.regionChanges, "centers": self.centeredCount, "touch_sequences": self.touchSequences, "scroll_enabled": self.map.isScrollEnabled, "zoom_enabled": self.map.isZoomEnabled])
       case "center":
         guard let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
         let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
@@ -323,6 +325,19 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
       default: result(FlutterMethodNotImplemented)
       }
     }
+  }
+  // Public UIKit state only: no view descriptions, coordinates or user values.
+  private func gestureDiagnostics() -> [[String: Any]] {
+    var rows: [[String: Any]] = []
+    var current: UIView? = map
+    while let view = current, rows.count < 8 {
+      let gestures = (view.gestureRecognizers ?? []).map { gesture -> [String: Any] in
+        ["type": String(describing: type(of: gesture)), "state": gesture.state.rawValue, "enabled": gesture.isEnabled]
+      }
+      rows.append(["view_type": String(describing: type(of: view)), "user_interaction": view.isUserInteractionEnabled, "gestures": gestures])
+      current = view.superview
+    }
+    return rows
   }
   private var locationAuthorized: Bool {
     [.authorizedAlways, .authorizedWhenInUse].contains(locator.authorizationStatus)
