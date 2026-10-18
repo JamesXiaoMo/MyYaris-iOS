@@ -40,10 +40,7 @@ class AppleMapController {
   MethodChannel? channel;
   Future<List<MapSelection>> search(String query) async {
     if (channel == null) {
-      throw PlatformException(
-        code: 'MAP_NOT_READY',
-        message: '地图尚未就绪，请稍后重试',
-      );
+      throw PlatformException(code: 'MAP_NOT_READY', message: '地图尚未就绪，请稍后重试');
     }
     final text = query.trim();
     if (text.isEmpty || text.length > 100) {
@@ -81,17 +78,37 @@ class AppleMap extends StatefulWidget {
     this.selection,
     this.controller,
     this.active = true,
+    this.onInteractionChanged,
   });
   final ValueChanged<MapSelection> onSelected;
   final MapSelection? selection;
   final AppleMapController? controller;
   final bool active;
+  final ValueChanged<bool>? onInteractionChanged;
   @override
   State<AppleMap> createState() => _AppleMapState();
 }
 
 class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   MethodChannel? channel;
+  final pointers = <int>{};
+  static final recognizers = <Factory<OneSequenceGestureRecognizer>>{
+    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+  };
+  void pointerDown(PointerDownEvent event) {
+    if (pointers.isEmpty) {
+      channel?.invokeMethod<void>('interaction', true);
+      widget.onInteractionChanged?.call(true);
+    }
+    pointers.add(event.pointer);
+  }
+
+  void pointerEnd(PointerEvent event) {
+    if (!pointers.remove(event.pointer) || pointers.isNotEmpty) return;
+    channel?.invokeMethod<void>('interaction', false);
+    widget.onInteractionChanged?.call(false);
+  }
+
   String? error;
   Timer? timer;
   bool ready = false;
@@ -146,6 +163,11 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     foreground = state == AppLifecycleState.resumed;
+    if (!foreground && pointers.isNotEmpty) {
+      pointers.clear();
+      channel?.invokeMethod<void>('interaction', false);
+      widget.onInteractionChanged?.call(false);
+    }
     updateActive();
   }
 
@@ -155,6 +177,7 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
     channel!.setMethodCallHandler((call) async {
       if (!mounted) return;
       if (call.method == 'selected' && call.arguments is Map) {
+        if (pointers.isNotEmpty) return;
         final args = call.arguments as Map;
         final lat = args['latitude'], lon = args['longitude'];
         if (lat is num &&
@@ -167,6 +190,7 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
         }
       } else if (call.method == 'ready') {
         timer?.cancel();
+        if (ready && error == null) return;
         setState(() {
           ready = true;
           error = null;
@@ -199,7 +223,14 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   void didUpdateWidget(covariant AppleMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selection != widget.selection) center();
-    if (oldWidget.active != widget.active) updateActive();
+    if (oldWidget.active != widget.active) {
+      if (!widget.active && pointers.isNotEmpty) {
+        pointers.clear();
+        channel?.invokeMethod<void>('interaction', false);
+        // Parent receives active=false in the same build and resets its hold.
+      }
+      updateActive();
+    }
   }
 
   @override
@@ -219,14 +250,15 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
     fit: StackFit.expand,
     children: [
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS)
-        UiKitView(
-          viewType: 'io.myyaris/map',
-          onPlatformViewCreated: created,
-          gestureRecognizers: {
-            Factory<OneSequenceGestureRecognizer>(
-              () => EagerGestureRecognizer(),
-            ),
-          },
+        Listener(
+          onPointerDown: pointerDown,
+          onPointerUp: pointerEnd,
+          onPointerCancel: pointerEnd,
+          child: UiKitView(
+            viewType: 'io.myyaris/map',
+            onPlatformViewCreated: created,
+            gestureRecognizers: recognizers,
+          ),
         )
       else
         const Center(child: Text('Apple 地图仅支持 iPhone，仍可使用收藏与输入目的地')),

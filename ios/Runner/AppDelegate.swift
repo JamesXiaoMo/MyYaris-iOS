@@ -68,7 +68,7 @@ import UniformTypeIdentifiers
         if UserDefaults.standard.bool(forKey: key) { result(false) }
         else { UserDefaults.standard.set(true, forKey: key); result(true) }
       case "captureHome":
-        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png", "map-search-device.png", "folder-overview-device.png", "folder-address-device.png", "folder-delete-device.png", "folder-uncategorized-device.png"].contains(name),
+        guard let name = call.arguments as? String, ["home-device.png", "home-offline-device.png", "music-stage1-device.png", "stage1-phone-search.png", "stage1-phone-playing.png", "stage1-phone-controls.png", "stage1-phone-completed.png", "login-device.png", "glass-home-device.png", "glass-drag-device.png", "glass-driving-device.png", "glass-music-device.png", "glass-settings-device.png", "glass-login-device.png", "liked-music-device.png", "liked-playlist-device.png", "liked-playlist-more-device.png", "liked-login-device.png", "map-driving-device.png", "map-drawer-device.png", "map-search-device.png", "folder-overview-device.png", "folder-address-device.png", "folder-delete-device.png", "folder-uncategorized-device.png", "map-gesture-device.png"].contains(name),
               let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
               let window = scene.windows.first(where: { $0.isKeyWindow }),
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -81,7 +81,7 @@ import UniformTypeIdentifiers
         catch { result(FlutterError(code: "SCREENSHOT_WRITE", message: "App截图保存失败", details: nil)) }
       case "saveEvidence":
         guard let payload = call.arguments as? [String: Any], let name = payload["name"] as? String,
-              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json", "map-ui-proof.json", "folder-sync-created.json", "folder-sync-proof.json"].contains(name),
+              ["driving-device.png", "favorites-device.png", "favorites-proof.json", "home-proof.json", "music-stage1-proof.json", "stage1-live-proof.json", "glass-tabs-proof.json", "liked-playlist-proof.json", "map-ui-proof.json", "folder-sync-created.json", "folder-sync-proof.json", "map-gesture-proof.json"].contains(name),
               let bytes = payload["bytes"] as? FlutterStandardTypedData,
               let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
           result(FlutterError(code: "INVALID_EVIDENCE", message: "验收文件格式错误", details: nil)); return
@@ -253,11 +253,18 @@ private final class YarisMapFactory: NSObject, FlutterPlatformViewFactory {
     YarisMapView(frame: frame, id: id, messenger: messenger)
   }
 }
+// Selection observes taps but must never prevent MapKit's own gestures.
+private final class YarisSelectionTap: UITapGestureRecognizer {
+  override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+}
 private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
   private let map: MKMapView
   private let channel: FlutterMethodChannel
   private let locator = CLLocationManager()
   private var released = false, active = false, locating = false
+  private var interacting = false, cameraMoving = false, readySent = false
+  private var selectedCount = 0, regionChanges = 0, centeredCount = 0, touchSequences = 0
+  private var pendingPick: DispatchWorkItem?
   private var cameraEpoch = 0, locateEpoch = 0, searchEpoch = 0
   private var locationResult: FlutterResult?
   private var locationTimer: Timer?
@@ -277,20 +284,28 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     // Apple's attribution above that 24pt overlap, not under the drawer.
     map.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 36, right: 8)
     map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 36.2, longitude: 138.25), span: MKCoordinateSpan(latitudeDelta: 14, longitudeDelta: 14)), animated: false)
-    let tap = UITapGestureRecognizer(target: self, action: #selector(picked(_:)))
+    let tap = YarisSelectionTap(target: self, action: #selector(picked(_:)))
     tap.delegate = self; tap.cancelsTouchesInView = false; map.addGestureRecognizer(tap)
-    let pan = UIPanGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
-    pan.delegate = self; pan.cancelsTouchesInView = false; map.addGestureRecognizer(pan)
-    let pinch = UIPinchGestureRecognizer(target: self, action: #selector(cameraGesture(_:)))
-    pinch.delegate = self; pinch.cancelsTouchesInView = false; map.addGestureRecognizer(pinch)
+    // MapKit owns pan/pinch. Never add competing observers that recognize them.
+    tap.numberOfTouchesRequired = 1
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self = self, !self.released else { result(nil); return }
       switch call.method {
+      case "interaction":
+        self.interacting = (call.arguments as? Bool) == true
+        if self.interacting {
+          self.touchSequences += 1; self.cameraEpoch += 1
+          self.pendingPick?.cancel(); self.pendingPick = nil
+        }
+        result(nil)
+      case "diagnostics":
+        result(["interacting": self.interacting, "selections": self.selectedCount, "regions": self.regionChanges, "centers": self.centeredCount, "touch_sequences": self.touchSequences, "scroll_enabled": self.map.isScrollEnabled, "zoom_enabled": self.map.isZoomEnabled])
       case "center":
         guard let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
         let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         guard lat.isFinite, lon.isFinite, CLLocationCoordinate2DIsValid(c) else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
-        self.cameraEpoch += 1
+        guard !self.interacting else { result(nil); return }
+        self.cameraEpoch += 1; self.centeredCount += 1
         self.pin(c, title: data["title"] as? String ?? "目的地")
         self.map.setRegion(MKCoordinateRegion(center: c, latitudinalMeters: 2000, longitudinalMeters: 2000), animated: !UIAccessibility.isReduceMotionEnabled)
         result(nil)
@@ -344,7 +359,7 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     guard let location = locations.last, location.horizontalAccuracy >= 0,
           abs(location.timestamp.timeIntervalSinceNow) < 60,
           CLLocationCoordinate2DIsValid(location.coordinate) else { return }
-    if locateEpoch == cameraEpoch {
+    if locateEpoch == cameraEpoch && !interacting {
       map.setRegion(MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 1800, longitudinalMeters: 1800), animated: !UIAccessibility.isReduceMotionEnabled)
     }
     let callback = locationResult
@@ -391,25 +406,47 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     let mark = MKPointAnnotation(); mark.coordinate = c; mark.title = title
     map.addAnnotation(mark)
   }
-  @objc private func cameraGesture(_ gesture: UIGestureRecognizer) {
-    if gesture.state == .began { cameraEpoch += 1 }
+  // Observe only selection taps; MapKit remains the sole owner of pan/pinch.
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { gestureRecognizer is YarisSelectionTap }
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    var view = touch.view
+    while let current = view, current !== map {
+      if current is UIControl || current is MKAnnotationView { return false }
+      view = current.superview
+    }
+    return true
   }
-  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
   @objc private func picked(_ gesture: UITapGestureRecognizer) {
-    guard gesture.state == .ended, !released else { return }
+    guard gesture.state == .ended, !released, !cameraMoving else { return }
     let c = map.convert(gesture.location(in: map), toCoordinateFrom: map)
     guard CLLocationCoordinate2DIsValid(c) else { return }
-    cameraEpoch += 1; pin(c, title: "地图选点")
-    channel.invokeMethod("selected", arguments: ["latitude": c.latitude, "longitude": c.longitude])
+    pendingPick?.cancel()
+    let epoch = cameraEpoch
+    // A second touch/double tap or camera motion invalidates this single tap.
+    let work = DispatchWorkItem { [weak self] in
+      guard let self = self, !self.released, !self.interacting, !self.cameraMoving,
+            self.cameraEpoch == epoch else { return }
+      self.cameraEpoch += 1; self.selectedCount += 1
+      self.pin(c, title: "地图选点")
+      self.channel.invokeMethod("selected", arguments: ["latitude": c.latitude, "longitude": c.longitude])
+    }
+    pendingPick = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
   }
+  func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+    cameraMoving = true; cameraEpoch += 1; regionChanges += 1
+    pendingPick?.cancel(); pendingPick = nil
+  }
+  func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) { cameraMoving = false }
   func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) {
-    if !released && fullyRendered { channel.invokeMethod("ready", arguments: nil) }
+    if !released && fullyRendered && !readySent { readySent = true; channel.invokeMethod("ready", arguments: nil) }
   }
   func mapViewDidFailLoadingMap(_ mapView: MKMapView, withError error: Error) {
-    if !released { channel.invokeMethod("failed", arguments: nil) }
+    if !released { readySent = false; channel.invokeMethod("failed", arguments: nil) }
   }
   private func release() {
     guard !released else { return }; released = true
+    pendingPick?.cancel(); pendingPick = nil
     cancelSearch(); finishLocation(error: FlutterError(code: "CANCELLED", message: "地图已关闭", details: nil))
     map.showsUserLocation = false; locator.delegate = nil
     channel.setMethodCallHandler(nil); map.delegate = nil; map.removeAnnotations(map.annotations)

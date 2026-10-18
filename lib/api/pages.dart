@@ -138,7 +138,22 @@ class _NavigationPageState extends State<NavigationPage> {
   MapSelection? mapSelection;
   final mapController = AppleMapController();
   final drawer = DraggableScrollableController();
-  double drawerExtent = .34;
+  double drawerExtent = .34, heldDrawerExtent = .34;
+  bool mapInteracting = false;
+  void mapInteractionChanged(bool active) {
+    if (!mounted || mapInteracting == active) return;
+    setState(() {
+      if (active) heldDrawerExtent = drawerExtent;
+      mapInteracting = active;
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant NavigationPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.active) mapInteracting = false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -505,12 +520,16 @@ class _NavigationPageState extends State<NavigationPage> {
             builder: (context, constraints) => Stack(
               children: [
                 Positioned.fill(
-                  bottom: (constraints.maxHeight * drawerExtent - 24).clamp(
-                    0.0,
-                    constraints.maxHeight,
-                  ),
+                  bottom:
+                      (constraints.maxHeight *
+                                  (mapInteracting
+                                      ? heldDrawerExtent
+                                      : drawerExtent) -
+                              24)
+                          .clamp(0.0, constraints.maxHeight),
                   child: AppleMap(
                     controller: mapController,
+                    onInteractionChanged: mapInteractionChanged,
                     active: widget.active,
                     selection: mapSelection,
                     onSelected: selectPoint,

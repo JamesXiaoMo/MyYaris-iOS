@@ -4,6 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myyaris_ios/apple_map.dart';
+import 'package:myyaris_ios/api/pages.dart';
+import 'package:myyaris_ios/api/backend.dart';
+import 'widget_test.dart' show FixtureSession;
+import 'package:http/testing.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   testWidgets(
@@ -77,6 +82,33 @@ void main() {
         await tester.pump();
       }
 
+      final one = await tester.startGesture(
+        const Offset(100, 200),
+        pointer: 21,
+      );
+      final two = await tester.startGesture(
+        const Offset(180, 200),
+        pointer: 22,
+      );
+      await one.moveBy(const Offset(-20, 20));
+      await two.moveBy(const Offset(20, -20));
+      await one.up();
+      await event('selected', {'latitude': 34.4, 'longitude': 132.4});
+      expect(picked, isEmpty, reason: 'Second pinch pointer is still down');
+      expect(
+        nativeCalls
+            .where((c) => c.method == 'interaction')
+            .map((c) => c.arguments),
+        [true],
+      );
+      await two.cancel();
+      await tester.pump();
+      expect(
+        nativeCalls
+            .where((c) => c.method == 'interaction')
+            .map((c) => c.arguments),
+        [true, false],
+      );
       await event('selected', {'latitude': 91, 'longitude': 132});
       expect(picked, isEmpty);
       await event('selected', {'latitude': 34.4, 'longitude': 132.4});
@@ -92,11 +124,95 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
       expect(
         nativeCalls.every(
-          (c) =>
-              {'center', 'setActive', 'locate', 'dispose'}.contains(c.method),
+          (c) => {
+            'center',
+            'setActive',
+            'locate',
+            'dispose',
+            'interaction',
+          }.contains(c.method),
         ),
         true,
       );
+    },
+  );
+  testWidgets(
+    'map viewport and platform identity stay stable while multi-touch overlaps drawer resize',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final messenger = tester.binding.defaultBinaryMessenger;
+      final channels = <MethodChannel>[];
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('flutter/platform_views'),
+        (call) async {
+          if (call.method == 'create') {
+            final channel = MethodChannel(
+              'io.myyaris/map/${(call.arguments as Map)['id']}',
+            );
+            channels.add(channel);
+            messenger.setMockMethodCallHandler(
+              channel,
+              (call) async =>
+                  call.method == 'locate' ? {'status': 'located'} : null,
+            );
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(
+          const MethodChannel('flutter/platform_views'),
+          null,
+        );
+        for (final channel in channels) {
+          messenger.setMockMethodCallHandler(channel, null);
+        }
+      });
+      final session = FixtureSession(
+        api: BackendApi(
+          client: MockClient(
+            (_) async => http.Response(
+              '{"items":[],"total":0,"has_more":false,"uncategorized_count":0}',
+              200,
+            ),
+          ),
+        )..token = 'unit',
+      );
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: NavigationPage(session: session)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = tester.getSize(find.byType(UiKitView));
+      final one = await tester.startGesture(
+        const Offset(120, 160),
+        pointer: 21,
+      );
+      final two = await tester.startGesture(
+        const Offset(220, 160),
+        pointer: 22,
+      );
+      await tester.pump();
+      final dynamic navigation = tester.state(find.byType(NavigationPage));
+      final drawer = navigation.drawer as DraggableScrollableController;
+      drawer.jumpTo(.70);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(UiKitView)), before);
+      expect(channels.length, 1);
+      await one.up();
+      await tester.pump();
+      expect(tester.getSize(find.byType(UiKitView)), before);
+      await two.cancel();
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byType(UiKitView)).height,
+        lessThan(before.height),
+      );
+      await tester.pumpWidget(const SizedBox());
+      debugDefaultTargetPlatformOverride = null;
     },
   );
 }
