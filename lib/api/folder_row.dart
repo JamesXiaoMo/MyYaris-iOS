@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'favorites.dart';
 
-/// Right swipe reveals management actions without dismissing or deleting a row.
+/// Left swipe reveals management actions without dismissing or deleting a row.
 class FolderRow extends StatefulWidget {
   const FolderRow({
     super.key,
@@ -28,6 +28,7 @@ class _FolderRowState extends State<FolderRow> {
         children: [
           Positioned.fill(
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 SizedBox(
                   width: 66,
@@ -54,11 +55,11 @@ class _FolderRowState extends State<FolderRow> {
           GestureDetector(
             onHorizontalDragUpdate: widget.enabled
                 ? (details) => setState(
-                    () => offset = (offset + details.delta.dx).clamp(0, 132),
+                    () => offset = (offset + details.delta.dx).clamp(-132, 0),
                   )
                 : null,
             onHorizontalDragEnd: (_) =>
-                setState(() => offset = offset > 44 ? 132 : 0),
+                setState(() => offset = offset < -44 ? -132 : 0),
             onHorizontalDragCancel: () => setState(() => offset = 0),
             child: AnimatedContainer(
               duration: MediaQuery.disableAnimationsOf(context)
@@ -71,18 +72,8 @@ class _FolderRowState extends State<FolderRow> {
                   key: ValueKey('folder-${widget.folder.id}'),
                   leading: const Icon(Icons.folder_outlined),
                   title: Text(widget.folder.name),
-                  subtitle: Text('${widget.folder.count} 个地址 · 右滑管理'),
+                  subtitle: Text('${widget.folder.count} 个地址'),
                   onTap: widget.enabled ? widget.open : null,
-                  trailing: PopupMenuButton<String>(
-                    tooltip: '管理分类',
-                    enabled: widget.enabled,
-                    onSelected: (value) =>
-                        value == 'rename' ? widget.rename() : widget.remove(),
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'rename', child: Text('重命名分类')),
-                      PopupMenuItem(value: 'delete', child: Text('删除分类')),
-                    ],
-                  ),
                 ),
               ),
             ),

@@ -301,7 +301,7 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
         }
         result(nil)
       case "diagnostics":
-        result(["blocking_policy": "waitUntilTouchesEnded", "gesture_chain": self.gestureDiagnostics(), "interacting": self.interacting, "selections": self.selectedCount, "regions": self.regionChanges, "centers": self.centeredCount, "touch_sequences": self.touchSequences, "scroll_enabled": self.map.isScrollEnabled, "zoom_enabled": self.map.isZoomEnabled])
+        result(["map_style": self.map.mapType == .hybrid ? "satellite" : "standard", "blocking_policy": "waitUntilTouchesEnded", "gesture_chain": self.gestureDiagnostics(), "interacting": self.interacting, "selections": self.selectedCount, "regions": self.regionChanges, "centers": self.centeredCount, "touch_sequences": self.touchSequences, "scroll_enabled": self.map.isScrollEnabled, "zoom_enabled": self.map.isZoomEnabled])
       case "center":
         guard let data = call.arguments as? [String: Any], let lat = data["latitude"] as? Double, let lon = data["longitude"] as? Double else { result(FlutterError(code: "COORDINATE", message: "地图坐标无效", details: nil)); return }
         let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
@@ -318,6 +318,11 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
           self.finishLocation(error: FlutterError(code: "CANCELLED", message: "定位已暂停", details: nil))
         }
         result(nil)
+      case "setMapStyle":
+        guard let data = call.arguments as? [String: Any], let style = data["style"] as? String, ["standard", "satellite"].contains(style) else { result(FlutterError(code: "MAP_STYLE", message: "地图样式无效", details: nil)); return }
+        guard !self.interacting else { result(FlutterError(code: "MAP_BUSY", message: "请在地图手势结束后切换", details: nil)); return }
+        self.map.mapType = style == "satellite" ? .hybrid : .standard
+        result(["style": style])
       case "locate": self.beginLocation(result)
       case "search": self.startSearch(call.arguments as? String ?? "", result: result)
       case "cancelSearch": self.cancelSearch(); result(nil)

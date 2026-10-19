@@ -134,12 +134,15 @@ class _NavigationPageState extends State<NavigationPage> {
   Map<String, dynamic>? resolved, query;
   String? error;
   bool busy = false;
+  bool pointPromptOpen = false;
   String? resolveKey, dispatchKey, resolveInput;
   MapSelection? mapSelection;
   final mapController = AppleMapController();
   final drawer = DraggableScrollableController();
   double drawerExtent = .34, heldDrawerExtent = .34;
   double _sheetHeight = 0;
+  double _snapFraction = -1;
+  List<double> _drawerSnapSizes = const [.22, .34, .70, .86];
   double get _barFraction => _sheetHeight <= 0
       ? 0
       : (MediaQuery.paddingOf(context).bottom / _sheetHeight).clamp(0, .5);
@@ -175,22 +178,110 @@ class _NavigationPageState extends State<NavigationPage> {
     });
   }
 
-  void selectPoint(MapSelection point) {
-    if (busy) return;
+  bool _samePoint(Map value, MapSelection point) =>
+      value['latitude'] is num &&
+      value['longitude'] is num &&
+      ((value['latitude'] as num) - point.latitude).abs() < .000001 &&
+      ((value['longitude'] as num) - point.longitude).abs() < .000001;
+
+  Future<void> selectPoint(MapSelection point) async {
+    if (busy ||
+        pointPromptOpen ||
+        !point.latitude.isFinite ||
+        !point.longitude.isFinite ||
+        point.latitude.abs() > 90 ||
+        point.longitude.abs() > 180) {
+      return;
+    }
+    pointPromptOpen = true;
+    final messenger = ScaffoldMessenger.of(context);
+    final reuseResolution =
+        input.text == '${point.latitude}, ${point.longitude}' &&
+        resolved != null &&
+        query != null;
+    final token = widget.session.api.token,
+        origin = widget.session.api.baseUrl,
+        device = widget.session.api.deviceId;
+    bool sameIdentity() =>
+        mounted &&
+        token == widget.session.api.token &&
+        origin == widget.session.api.baseUrl &&
+        device == widget.session.api.deviceId;
     setState(() {
       mapSelection = point;
       input.text = '${point.latitude}, ${point.longitude}';
-      resolved = null;
-      query = null;
       error = null;
-      resolveKey = dispatchKey = resolveInput = null;
+      if (!reuseResolution) {
+        resolved = null;
+        query = null;
+        resolveKey = dispatchKey = resolveInput = null;
+      }
     });
-    if (drawer.isAttached) {
-      drawer.animateTo(
-        _sheetSize(.46),
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          key: const ValueKey('map-point-confirmation'),
+          title: const Text('发送目的地到车机？'),
+          content: Text(
+            '${point.title}\nWGS84 纬度 ${point.latitude.toStringAsFixed(6)} · 经度 ${point.longitude.toStringAsFixed(6)}\n目标：$device',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              key: const ValueKey('map-point-send'),
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('发送到车机'),
+            ),
+          ],
+        ),
       );
+      if (confirmed != true || !sameIdentity()) return;
+      if (!reuseResolution) await resolve();
+      if (!sameIdentity()) return;
+      if (query?['task_id'] != null) {
+        await loadResolved();
+        if (sameIdentity()) {
+          messenger.showSnackBar(
+            const SnackBar(content: Text('该目的地已提交，已查询回执，未重复派发')),
+          );
+        }
+        return;
+      }
+      if (error == null) {
+        final candidates = ((query?['candidates'] as List?) ?? [])
+            .whereType<Map>()
+            .where((c) => _samePoint(c, point))
+            .toList();
+        if (candidates.length == 1 &&
+            candidates.single['candidate_id'] is String &&
+            query?['task_id'] == null) {
+          await send(
+            candidates.single['candidate_id'] as String,
+            confirmedPoint: point,
+          );
+        } else {
+          error = '解析结果与确认的选点不一致或尚未完成，未派发。请重新选择目的地';
+        }
+      }
+      if (sameIdentity()) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(error ?? '目的地已提交，等待车机回执')),
+        );
+      }
+    } catch (e) {
+      if (sameIdentity()) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(e is ApiFailure ? e.message : '目的地处理失败，未自动重试，请核对回执'),
+          ),
+        );
+      }
+    } finally {
+      pointPromptOpen = false;
     }
   }
 
@@ -233,6 +324,7 @@ class _NavigationPageState extends State<NavigationPage> {
           FilledButton(
             onPressed: () {
               Navigator.pop(context);
+              setState(() => mapSelection = null);
               resolve();
             },
             child: const Text('解析目的地'),
@@ -284,11 +376,19 @@ class _NavigationPageState extends State<NavigationPage> {
       query = null;
     });
     try {
+      final token = widget.session.api.token,
+          origin = widget.session.api.baseUrl,
+          device = widget.session.api.deviceId;
       final r = await widget.session.api.resolveDestination(
         input.text.trim(),
         resolveKey!,
       );
-      if (!mounted) return;
+      if (!mounted ||
+          token != widget.session.api.token ||
+          origin != widget.session.api.baseUrl ||
+          device != widget.session.api.deviceId) {
+        return;
+      }
       setState(() {
         resolved = r;
         query = r['candidates'] is List ? r : null;
@@ -357,10 +457,19 @@ class _NavigationPageState extends State<NavigationPage> {
 
   Future<void> loadResolved() async {
     if (resolved == null) return;
+    final token = widget.session.api.token,
+        origin = widget.session.api.baseUrl,
+        device = widget.session.api.deviceId;
     final q = await widget.session.api.call(
       'GET',
       '/destinations/${Uri.encodeComponent('${resolved!['destination_id'] ?? resolved!['request_id']}')}',
     );
+    if (!mounted ||
+        token != widget.session.api.token ||
+        origin != widget.session.api.baseUrl ||
+        device != widget.session.api.deviceId) {
+      return;
+    }
     if (mounted) {
       setState(() {
         query = q;
@@ -374,17 +483,30 @@ class _NavigationPageState extends State<NavigationPage> {
         'GET',
         '/tasks/${Uri.encodeComponent('${q['task_id']}')}',
       );
-      await widget.session.acceptNavigationTask(task);
+      if (mounted &&
+          token == widget.session.api.token &&
+          origin == widget.session.api.baseUrl &&
+          device == widget.session.api.deviceId) {
+        await widget.session.acceptNavigationTask(task);
+      }
     }
   }
 
-  Future<void> send([String? candidate]) async {
+  Future<void> send(String? candidate, {MapSelection? confirmedPoint}) async {
     if (busy || candidate == null) return;
-    if (!await confirmAction(
-      context,
-      '发送确认后的目的地',
-      '将所选候选发送到 ${widget.session.api.deviceId}。任务提交不等于已开始导航。',
-    )) {
+    if (confirmedPoint != null &&
+        !((query?['candidates'] as List?) ?? []).whereType<Map>().any(
+          (c) =>
+              c['candidate_id'] == candidate && _samePoint(c, confirmedPoint),
+        )) {
+      return;
+    }
+    if (confirmedPoint == null &&
+        !await confirmAction(
+          context,
+          '发送确认后的目的地',
+          '将所选候选发送到 ${widget.session.api.deviceId}。任务提交不等于已开始导航。',
+        )) {
       return;
     }
     if (!mounted) return;
@@ -547,6 +669,17 @@ class _NavigationPageState extends State<NavigationPage> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               _sheetHeight = constraints.maxHeight;
+              // Flutter compares snapSizes by list identity. A new list on
+              // every drag tick forces goBallistic(0) and cancels the drag.
+              if (_snapFraction != _barFraction) {
+                _snapFraction = _barFraction;
+                _drawerSnapSizes = [
+                  .22,
+                  .34,
+                  .70,
+                  .86,
+                ].map(_sheetSize).toList();
+              }
               return Stack(
                 children: [
                   Positioned.fill(
@@ -573,15 +706,15 @@ class _NavigationPageState extends State<NavigationPage> {
                     initialChildSize: _sheetSize(.34),
                     maxChildSize: _sheetSize(.86),
                     snap: true,
-                    snapSizes: [.22, .34, .70, .86].map(_sheetSize).toList(),
+                    snapSizes: _drawerSnapSizes,
                     builder: (context, scroll) => DrivingFavoritesDrawer(
                       session: widget.session,
                       controller: scroll,
                       selection: mapSelection,
                       destinationPanel:
-                          (mapSelection != null ||
-                              input.text.trim().isNotEmpty ||
-                              resolved != null)
+                          (mapSelection == null &&
+                              (input.text.trim().isNotEmpty ||
+                                  resolved != null))
                           ? panel
                           : const SizedBox.shrink(),
                       onInput: enterDestination,

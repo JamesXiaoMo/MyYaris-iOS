@@ -113,6 +113,8 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   Timer? timer;
   bool ready = false;
   bool locating = false;
+  bool satellite = false;
+  bool changingStyle = false;
   bool foreground = true;
   String? locationMessage;
   String locationStatus = 'not_requested';
@@ -120,6 +122,27 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  Future<void> toggleMapStyle() async {
+    if (channel == null || changingStyle || pointers.isNotEmpty) return;
+    final style = satellite ? 'standard' : 'satellite';
+    setState(() => changingStyle = true);
+    try {
+      final result = await channel!.invokeMapMethod<String, dynamic>(
+        'setMapStyle',
+        {'style': style},
+      );
+      if (!mounted) return;
+      if (result?['style'] != style) {
+        throw PlatformException(code: 'MAP_STYLE', message: '地图样式切换未确认');
+      }
+      setState(() => satellite = style == 'satellite');
+    } catch (_) {
+      if (mounted) setState(() => locationMessage = '地图样式切换失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => changingStyle = false);
+    }
   }
 
   Future<void> locate({bool automatic = false}) async {
@@ -302,6 +325,25 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
             ),
           ),
         ),
+      Positioned(
+        bottom: 100,
+        right: 12,
+        child: Material(
+          color: const Color(0xED192435),
+          borderRadius: BorderRadius.circular(16),
+          child: IconButton(
+            key: const ValueKey('map-style-toggle'),
+            tooltip: satellite ? '切换到标准地图' : '切换到卫星地图',
+            isSelected: satellite,
+            onPressed:
+                !widget.active || !ready || changingStyle || pointers.isNotEmpty
+                ? null
+                : toggleMapStyle,
+            icon: const Icon(Icons.satellite_alt_outlined),
+            selectedIcon: const Icon(Icons.map_outlined),
+          ),
+        ),
+      ),
       Positioned(
         bottom: 46,
         right: 12,

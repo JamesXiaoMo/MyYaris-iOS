@@ -195,6 +195,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('家'));
       await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('map-point-confirmation')),
+        findsOneWidget,
+      );
+      expect(writes, isEmpty);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('destination-input-open')));
       await tester.pumpAndSettle();
       final field = tester.widget<TextField>(

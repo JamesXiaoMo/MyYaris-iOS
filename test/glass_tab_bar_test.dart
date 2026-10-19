@@ -11,6 +11,54 @@ import 'widget_test.dart' show FixtureSession;
 
 void main() {
   testWidgets(
+    'drawer follows a held vertical drag across rebuilds without forced snap',
+    (tester) async {
+      final session = FixtureSession();
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: YarisShell(session: session, initializeSession: false),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tab-1')));
+      await tester.pumpAndSettle();
+      DraggableScrollableSheet sheet() =>
+          tester.widget<DraggableScrollableSheet>(
+            find.byType(DraggableScrollableSheet),
+          );
+      final sizes = sheet().snapSizes;
+      final controller = sheet().controller!;
+      final initial = controller.size;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('favorites-handle'))),
+      );
+      for (var i = 0; i < 6; i++) {
+        await gesture.moveBy(const Offset(0, -30));
+        await tester.pump(const Duration(milliseconds: 30));
+        if (i == 2) {
+          session.publish();
+          await tester.pump();
+        }
+      }
+      expect(
+        controller.size,
+        greaterThan(initial + .12),
+        reason:
+            'Must follow the finger before release, including after session updates',
+      );
+      expect(
+        identical(sheet().snapSizes, sizes),
+        true,
+        reason: 'Unchanged geometry must retain snap list identity',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'glass pixels change with the layer underneath, without an opaque strip',
     (tester) async {
       final boundary = GlobalKey();

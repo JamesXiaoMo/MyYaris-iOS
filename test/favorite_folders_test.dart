@@ -290,7 +290,7 @@ void main() {
     },
   );
   testWidgets(
-    'right swipe reveals management without deleting; editor conflict never reports success',
+    'left swipe reveals management without deleting; editor conflict never reports success',
     (tester) async {
       var deleted = 0;
       await tester.pumpWidget(
@@ -307,10 +307,13 @@ void main() {
       );
       await tester.drag(
         find.byKey(const ValueKey('folder-fld')),
-        const Offset(170, 0),
+        const Offset(-170, 0),
       );
       await tester.pumpAndSettle();
       expect(deleted, 0);
+      expect(find.byTooltip('管理分类'), findsNothing);
+      expect(find.textContaining('右滑管理'), findsNothing);
+      expect(find.text('2 个地址'), findsOneWidget);
       await tester.tap(find.byTooltip('删除分类，保留地址'));
       expect(deleted, 1);
       final api = BackendApi(

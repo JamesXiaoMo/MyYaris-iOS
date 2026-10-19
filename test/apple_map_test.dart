@@ -33,6 +33,9 @@ void main() {
                   message: '定位未授权',
                 );
               }
+              if (c.method == 'setMapStyle') {
+                return {'style': (c.arguments as Map)['style']};
+              }
               return c.method == 'locate'
                   ? {'status': 'located', 'approximate': false}
                   : null;
@@ -82,6 +85,23 @@ void main() {
         await tester.pump();
       }
 
+      await event('ready', null);
+      final centers = nativeCalls.where((c) => c.method == 'center').length;
+      await tester.tap(find.byKey(const ValueKey('map-style-toggle')));
+      await tester.pumpAndSettle();
+      expect(
+        nativeCalls.lastWhere((c) => c.method == 'setMapStyle').arguments,
+        {'style': 'satellite'},
+      );
+      expect(find.byTooltip('切换到标准地图'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('map-style-toggle')));
+      await tester.pumpAndSettle();
+      expect(
+        nativeCalls.lastWhere((c) => c.method == 'setMapStyle').arguments,
+        {'style': 'standard'},
+      );
+      expect(nativeCalls.where((c) => c.method == 'center').length, centers);
+
       final one = await tester.startGesture(
         const Offset(100, 200),
         pointer: 21,
@@ -130,6 +150,7 @@ void main() {
             'locate',
             'dispose',
             'interaction',
+            'setMapStyle',
           }.contains(c.method),
         ),
         true,
