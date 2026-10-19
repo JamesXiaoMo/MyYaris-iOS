@@ -14,7 +14,7 @@
 
 ---
 
-MyYaris 的 Flutter iPhone 客户端，通过 Tailscale 内的 HTTPS 与后端连接，将目的地和音乐控制指令发送到车机。
+MyYaris 的 Flutter iPhone 客户端，通过 HTTPS 连接自行配置的后端，将目的地和音乐控制指令发送到 Android 车机。可配合 Tailscale 私有网络使用，不绑定特定服务器或车机设备型号。
 
 ## 页面与能力
 
@@ -47,7 +47,7 @@ open ios/Runner.xcworkspace
 
 ## 接入说明
 
-- 手机与后端加入同一 Tailnet，后端提供有效证书的 HTTPS 地址。
+- 后端需提供有效证书的 HTTPS 地址；采用 Tailscale 部署时，手机与后端需加入同一 Tailnet。
 - 使用 MyYaris 用户账户登录，设备控制能力取决于后端授权。
 - 网易云会话与 MyYaris 登录分别管理；音乐访问受第三方服务及账号权限限制。
 - 导航打开回执、播放器状态与实际导航开始或扬声器出声是不同验证阶段。
