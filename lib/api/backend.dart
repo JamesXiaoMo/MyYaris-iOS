@@ -1,4 +1,5 @@
 import 'contracts.dart';
+import 'music_queue_contract.dart';
 import 'user_auth.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -45,12 +46,29 @@ class KeychainStore implements CredentialStore {
 }
 
 class ApiFailure implements Exception {
-  ApiFailure(this.message, {this.statusCode});
+  ApiFailure(this.message, {this.statusCode, this.errorCode});
   final int? statusCode;
+  final String? errorCode;
   final String message;
   @override
   String toString() => message;
 }
+
+const queueErrorMessages = <String, String>{
+  'PLAYBACK_CONSECUTIVE_FAILURES': '连续三首播放失败，请检查网络或网易云权限',
+  'OWNER_QUEUE_PERMISSION_DENIED': '当前账号无Owner喜欢歌单权限，请使用管理员账号',
+  'QUEUE_VERSION_CONFLICT': '队列版本已变化，请从第一页刷新，未混合分页',
+  'QUEUE_PRECONDITION_FAILED': '车机队列已变化，请刷新后重新确认操作',
+  'EMPTY_PLAYLIST': '我喜欢的音乐为空',
+  'QUEUE_NOT_READY': '队列尚未就绪，请稍后重试',
+  'INTELLIGENCE_AUTH_INVALID': '网易云授权失效，心动模式不可用，请管理者在账号页处理',
+  'INTELLIGENCE_UPSTREAM_FAILED': '网易云心动服务暂不可用，未切为相似歌曲或随机',
+  'INTELLIGENCE_QUEUE_EXHAUSTED': '心动队列已耗尽，请切回喜欢歌单',
+  'CAPABILITY_NOT_SUPPORTED': '车机尚不支持新版队列，请等待车机审核和升级',
+  'INVALID_SEED_SONG': '心动种子必须属于我喜欢的音乐',
+  'COMMAND_CONFLICT': '指令ID冲突，未自动重试',
+  'SEEK_PARAMETER_CONFLICT': '进度参数冲突',
+};
 
 String safeErrorCode(Map value) {
   final code = '${value['error_code'] ?? value['code'] ?? ''}';
@@ -74,6 +92,7 @@ String safeErrorCode(Map value) {
     'COMMAND_EXPIRED',
     'COMMAND_EXECUTION_ERROR',
   };
+  if (queueErrorMessages.containsKey(code)) return queueErrorMessages[code]!;
   return allowed.contains(code) ? code : '接口错误（请核对后端脱敏日志）';
 }
 
@@ -145,11 +164,26 @@ class BackendApi {
       final response = await http.Response.fromStream(
         await client.send(request).timeout(const Duration(seconds: 15)),
       ).timeout(const Duration(seconds: 20));
-      if (auth) await checkAuthStatus(response.statusCode, path, usedToken);
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        String? queueCode;
+        try {
+          final error = jsonDecode(utf8.decode(response.bodyBytes));
+          final detail = error is Map && error['detail'] is Map
+              ? error['detail']
+              : error;
+          final code = detail is Map ? detail['error_code'] : null;
+          if (queueErrorMessages.containsKey(code)) queueCode = code as String;
+        } catch (_) {}
+        if (auth &&
+            !(response.statusCode == 403 &&
+                queueCode == 'OWNER_QUEUE_PERMISSION_DENIED')) {
+          await checkAuthStatus(response.statusCode, path, usedToken);
+        }
         throw ApiFailure(
           response.statusCode == 401
               ? (path.endsWith('/auth/login') ? '用户名或密码不正确' : '登录会话已失效，请重新登录')
+              : queueCode != null
+              ? queueErrorMessages[queueCode]!
               : response.statusCode == 403
               ? (path.endsWith('/auth/register')
                     ? '后端未开放普通注册'
@@ -163,6 +197,7 @@ class BackendApi {
               ? '注册失败：用户名不可用或不符合后端规则'
               : '接口返回 HTTP ${response.statusCode}，请重试或核对后端',
           statusCode: response.statusCode,
+          errorCode: queueCode,
         );
       }
       if (response.body.isEmpty) return {};
@@ -214,6 +249,27 @@ class BackendApi {
       throw ApiFailure('后端尚未提供本轮两阶段契约标识；已阻止旧版提前派发，请等待后端部署');
     }
   }
+
+  Future<MusicQueuePage> readMusicQueue({
+    String? source,
+    String? queueId,
+    int? version,
+    int offset = 0,
+  }) async => MusicQueuePage.fromJson(
+    await call(
+      'GET',
+      '/api/v1/music/queue',
+      query: {
+        'device_id': deviceId,
+        'offset': '$offset',
+        'limit': '50',
+        'source': ?source,
+        'queue_id': ?queueId,
+        if (version != null) 'queue_version': '$version',
+      },
+    ),
+    origin: validateBase(baseUrl),
+  );
 
   Future<Map<String, dynamic>> resolveDestination(
     String input,
@@ -1298,9 +1354,9 @@ class BackendSession extends ChangeNotifier {
           !MusicContract.sameDevice(p['device_id'], api.deviceId)) {
         throw ApiFailure('后端返回的设备不匹配，未应用快照');
       }
-      final validated = MusicContract.statusPatch(p);
+      final validated = MusicContract.statusPatch(MusicContract.envelope(p));
       if (validated.isEmpty) throw ApiFailure('后端快照无有效状态，保留最后一次状态');
-      playback = {...playback, ...validated};
+      if (!acceptPlaybackPatch(validated)) return;
       connection = '后端可达';
       verifyLog('HTTP_STATE_RECEIVED');
       statusReceivedAt = DateTime.now();
@@ -1533,7 +1589,7 @@ class BackendSession extends ChangeNotifier {
             !MusicContract.sameDevice(data['device_id'], api.deviceId)) {
           return;
         }
-        playback = {...playback, ...data};
+        if (!acceptPlaybackPatch(data)) return;
         verifyLog('WSS_STATE_RECEIVED');
         unawaited(syncCurrentTrack());
         statusReceivedAt = DateTime.now();
@@ -1570,7 +1626,122 @@ class BackendSession extends ChangeNotifier {
     );
   }
 
-  Future<void> playTrack(Map<String, dynamic> track) async {
+  bool get ownerQueueAllowed =>
+      userSignedIn && {'admin', 'owner'}.contains(userProfile['role']);
+  bool get queueV2Ready =>
+      heartbeatFresh &&
+      !playbackStale &&
+      (playback['capabilities'] is List) &&
+      (playback['capabilities'] as List).contains('queue_v2');
+  bool get hasAppliedQueue =>
+      queueV2Ready &&
+      playback['queue_id'] is String &&
+      (playback['queue_id'] as String).isNotEmpty &&
+      playback['queue_version'] is int &&
+      MusicQueuePage.sources.contains(playback['queue_source']);
+  String? get appliedQueueMode =>
+      hasAppliedQueue &&
+          MusicContract.queueModes.contains(playback['applied_mode'])
+      ? playback['applied_mode'] as String
+      : null;
+  bool acceptPlaybackPatch(Map<String, dynamic> patch) {
+    if (patch['device_id'] != null &&
+        !MusicContract.sameDevice(patch['device_id'], api.deviceId)) {
+      return false;
+    }
+    final oldSeq = playback['status_seq'], seq = patch['status_seq'];
+    if (oldSeq is int && (seq is! int || seq < oldSeq)) return false;
+    if (patch.containsKey('queue_id') &&
+        patch['queue_id'] != playback['queue_id']) {
+      playback.remove('applied_mode');
+      playback.remove('requested_mode');
+    }
+    playback = {...playback, ...patch};
+    return true;
+  }
+
+  Future<void> choosePlaybackMode(String mode) async {
+    if (!canControlVehicle) throw ApiFailure('当前账号未授权目标车机');
+    if (!ownerQueueAllowed) throw ApiFailure('当前账号无Owner喜欢歌单权限');
+    if (!queueV2Ready) {
+      throw ApiFailure(queueErrorMessages['CAPABILITY_NOT_SUPPORTED']!);
+    }
+    if (!MusicContract.queueModes.contains(mode)) throw ApiFailure('未知播放模式');
+    final who = '${api.baseUrl}\n${api.token}\n${api.deviceId}';
+    final params = <String, dynamic>{'mode': mode};
+    if (mode == 'intelligence') {
+      final favorite = await api.readMusicQueue(source: 'netease_favorite');
+      if ('${api.baseUrl}\n${api.token}\n${api.deviceId}' != who ||
+          !foreground ||
+          disposed) {
+        throw ApiFailure('会话已切换，未发送过期模式指令');
+      }
+      if (!favorite.established || favorite.tracks.isEmpty) {
+        throw ApiFailure('喜欢歌单尚未就绪，未请求心动');
+      }
+      params['seed_song_id'] = favorite.tracks.first['song_id'];
+    }
+    if (hasAppliedQueue) {
+      params['expected_queue_id'] = playback['queue_id'];
+      params['expected_queue_version'] = playback['queue_version'];
+    }
+    await sendCommand('set_playback_mode', params);
+  }
+
+  Future<void> playFavoriteTrack(Map<String, dynamic> track) async {
+    if (!canControlVehicle) throw ApiFailure('当前账号未授权目标车机');
+    if (!ownerQueueAllowed) throw ApiFailure('当前账号无Owner喜欢歌单权限');
+    if (!hasAppliedQueue || playback['queue_source'] != 'netease_favorite') {
+      throw ApiFailure('喜欢歌单尚未由车机应用，暂不能从此处点歌，请等待队列就绪');
+    }
+    final id = playback['queue_id'] as String,
+        version = playback['queue_version'] as int;
+    final who = '${api.baseUrl}\n${api.token}\n${api.deviceId}';
+    var offset = 0, found = false;
+    while (true) {
+      final page = await api.readMusicQueue(
+        queueId: id,
+        version: version,
+        offset: offset,
+      );
+      if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
+          disposed ||
+          !foreground) {
+        throw ApiFailure('会话已切换，已丢弃旧队列');
+      }
+      if (page.id != id ||
+          page.version != version ||
+          page.source != 'netease_favorite' ||
+          page.offset != offset) {
+        throw ApiFailure('喜欢队列版本变化，请刷新后重新选歌');
+      }
+      if (!page.established) throw ApiFailure('喜欢快照尚未完整建立，未发送选歌');
+      final song = track['song_id'] ?? track['id'];
+      found = page.tracks.any((t) => t['song_id'] == song);
+      if (found || !page.hasMore) break;
+      offset += page.tracks.length;
+      if (offset > 10000) throw ApiFailure('队列过大，请刷新后重试');
+    }
+    if (!found) throw ApiFailure('该曲目不在车机已应用的喜欢快照内，请刷新，未退为单曲');
+    if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
+        playback['queue_id'] != id ||
+        playback['queue_version'] != version) {
+      throw ApiFailure('会话或队列已变化，未发送过期选歌');
+    }
+    await playTrack(
+      track,
+      queueContext: {
+        'expected_queue_id': id,
+        'expected_queue_version': version,
+      },
+    );
+  }
+
+  Future<void> playTrack(
+    Map<String, dynamic> track, {
+    Map<String, dynamic> queueContext = const {},
+    bool singleTrack = false,
+  }) async {
     if (preparingTrack || commandPending || awaitingExecution) {
       throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
     }
@@ -1589,7 +1760,12 @@ class BackendSession extends ChangeNotifier {
           api.token != credential) {
         throw ApiFailure('App已离开前台或配置已改变，未发送过期选歌指令');
       }
-      await sendCommand('play_track', api.trackParams(track));
+      await sendCommand('play_track', {
+        ...api.trackParams(track),
+        if (singleTrack && api.trackSource(track) == 'netease')
+          'source': 'single_track',
+        ...queueContext,
+      });
       rememberTrack(track);
     } catch (e) {
       if (api.token != credential) rethrow;

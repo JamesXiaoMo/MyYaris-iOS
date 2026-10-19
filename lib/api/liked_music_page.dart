@@ -41,7 +41,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
     final who = model.identity;
     setState(() => selecting = true);
     try {
-      await widget.session.playTrack(track);
+      await widget.session.playFavoriteTrack(track);
       if (mounted && who == model.identity) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

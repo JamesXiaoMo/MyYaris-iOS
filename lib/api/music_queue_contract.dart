@@ -1,7 +1,7 @@
 import 'backend.dart' show ApiFailure;
 
-/// Metadata-only parsing for the draft V2.2 contract. No network or playback.
-/// UI/transport integration remains gated on the reviewed deployed contract.
+/// Metadata-only parsing for the reviewed V2.2 contract. No network or playback.
+/// Runtime calls remain gated on account, device capability and snapshot identity.
 class MusicQueuePage {
   MusicQueuePage._(
     this.id,
@@ -22,9 +22,10 @@ class MusicQueuePage {
   final String id, source;
   final int version, total, offset, limit;
   final bool established, hasMore;
+  bool get ready => established;
   final List<Map<String, dynamic>> tracks;
 
-  factory MusicQueuePage.fromJson(Map<String, dynamic> data) {
+  factory MusicQueuePage.fromJson(Map<String, dynamic> data, {Uri? origin}) {
     final id = data['queue_id'],
         version = data['queue_version'],
         source = data['source'];
@@ -65,17 +66,41 @@ class MusicQueuePage {
           !seen.add(row['track_id'])) {
         throw ApiFailure('队列曲目索引缺失或重复，未建立完整队列');
       }
-      if (source != 'single_track' &&
-          (row['id'] is! int ||
-              row['id'] <= 0 ||
-              row['track_id'] != 'netease_${row['id']}')) {
+      if ((row['song_id'] is! int ||
+          row['song_id'] <= 0 ||
+          row['track_id'] != 'netease_${row['song_id']}')) {
         throw ApiFailure('网易云队列曲目ID不符，未建立完整队列');
+      }
+      if (row['title'] is! String ||
+          row['artist'] is! String ||
+          row['duration_ms'] is! int ||
+          row['duration_ms'] < 0 ||
+          (row['playable'] != null && row['playable'] is! bool)) {
+        throw ApiFailure('队列曲目元数据格式不符');
+      }
+      final stream = row['stream_url'] is String
+          ? Uri.tryParse(row['stream_url'])
+          : null;
+      final canonical = '/api/v1/music/netease/stream/${row['song_id']}';
+      if (stream == null ||
+          stream.path != canonical ||
+          stream.hasQuery ||
+          stream.hasFragment ||
+          stream.userInfo.isNotEmpty ||
+          (stream.hasScheme
+              ? (stream.scheme != 'https' ||
+                    origin == null ||
+                    stream.origin != origin.origin)
+              : (stream.hasAuthority || !stream.path.startsWith('/')))) {
+        throw ApiFailure('队列流地址不符合私网HTTPS代理契约');
       }
       // Never forward an example/CDN/local HTTP URL from queue metadata as a
       // playable stream. Existing HTTPS resolution must validate each selection.
       tracks.add(
         Map<String, dynamic>.unmodifiable(
-          Map<String, dynamic>.from(row)..remove('stream_url'),
+          Map<String, dynamic>.from(row)
+            ..remove('stream_url')
+            ..['source'] = 'netease',
         ),
       );
     }

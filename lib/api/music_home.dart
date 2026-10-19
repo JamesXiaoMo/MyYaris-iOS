@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'backend.dart';
+import 'music_queue_browser.dart';
 import 'netease_account_view.dart';
 import 'liked_music_page.dart';
 import 'pages.dart' show MusicSearchPage, PlaybackPanel, AccountPage;
@@ -739,7 +740,8 @@ class MusicPlayerPage extends StatelessWidget {
                           onSelectMusic: () => Navigator.push<void>(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => LikedMusicPage(session: session),
+                              builder: (_) =>
+                                  MusicQueueBrowser(session: session),
                             ),
                           ),
                         ),

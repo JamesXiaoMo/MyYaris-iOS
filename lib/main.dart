@@ -5,6 +5,7 @@ import 'verification/favorites_evidence.dart';
 import 'verification/home_evidence.dart';
 import 'verification/music_diagnostic.dart';
 import 'api/backend.dart';
+import 'api/music_queue_browser.dart';
 import 'api/pages.dart';
 import 'api/login_page.dart';
 import 'package:flutter/cupertino.dart';
@@ -183,11 +184,7 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                     repeat: session.playback['loop_mode'] == 'all',
                     onPlay: () =>
                         _command(session.playing ? 'pause' : 'resume'),
-                    onRepeat: () => _command('set_loop', {
-                      'loop_mode': session.playback['loop_mode'] == 'all'
-                          ? 'one'
-                          : 'all',
-                    }),
+                    onRepeat: () => showQueueModes(context, session),
                     onDemo: (label) =>
                         _command(label == '上一曲' ? 'prev' : 'next'),
                   ),
@@ -285,8 +282,14 @@ class _HomePage extends StatelessWidget {
               () => onDemo('下一曲'),
             ),
             _control(
-              '列表循环',
-              repeat ? CupertinoIcons.repeat : CupertinoIcons.repeat_1,
+              appliedPlaybackLabel(session),
+              session.appliedQueueMode == 'shuffle'
+                  ? CupertinoIcons.shuffle
+                  : session.appliedQueueMode == 'intelligence'
+                  ? CupertinoIcons.heart
+                  : session.appliedQueueMode == 'single_loop'
+                  ? CupertinoIcons.repeat_1
+                  : CupertinoIcons.repeat,
               onRepeat,
             ),
           ],

@@ -13,6 +13,14 @@ class MusicContract {
     'set_loop',
     'set_shuffle',
     'set_volume',
+    'set_playback_mode',
+    'switch_queue',
+  };
+  static const queueModes = {
+    'list_loop',
+    'shuffle',
+    'intelligence',
+    'single_loop',
   };
   static String loop(Object? mode) => switch (mode) {
     'all' => 'all',
@@ -38,18 +46,42 @@ class MusicContract {
           throw ApiFailure('曲目或私网流地址无效');
         }
         final source = input['source'];
-        if (!{'local_repo', 'netease_cache', 'netease'}.contains(source)) {
+        if (!{
+          'local_repo',
+          'netease_cache',
+          'netease',
+          'single_track',
+        }.contains(source)) {
           throw ApiFailure('曲目来源无效');
+        }
+        if ((input['expected_queue_id'] != null &&
+                (input['expected_queue_id'] is! String ||
+                    (input['expected_queue_id'] as String).isEmpty)) ||
+            (input['expected_queue_version'] != null &&
+                (input['expected_queue_version'] is! int ||
+                    input['expected_queue_version'] < 0))) {
+          throw ApiFailure('队列前置条件无效');
         }
         return {
           'track_id': id,
           'stream_url': url.toString(),
           'source': source,
+          if (input['expected_queue_id'] is String)
+            'expected_queue_id': input['expected_queue_id'],
+          if (input['expected_queue_version'] is int &&
+              input['expected_queue_version'] >= 0)
+            'expected_queue_version': input['expected_queue_version'],
           if (input['song_id'] != null) 'song_id': input['song_id'],
           if (input['title'] != null) 'title': input['title'],
           if (input['artist'] != null) 'artist': input['artist'],
         };
       case 'seek':
+        final aliases = [
+          'seek_ms',
+          'seek_position_ms',
+          'position_ms',
+        ].where((k) => input[k] != null).map((k) => input[k]).toSet();
+        if (aliases.length > 1) throw ApiFailure('进度参数冲突');
         final value =
             input['seek_ms'] ??
             input['seek_position_ms'] ??
@@ -61,6 +93,47 @@ class MusicContract {
           throw ApiFailure('播放进度必须是非负毫秒整数');
         }
         return {'seek_ms': value.toInt()};
+      case 'set_playback_mode':
+      case 'switch_queue':
+        if (action == 'set_playback_mode' &&
+            !queueModes.contains(input['mode'])) {
+          throw ApiFailure('未知播放模式');
+        }
+        if (action == 'switch_queue' &&
+            !{'netease_favorite', 'single_track'}.contains(input['source'])) {
+          throw ApiFailure('未知队列来源');
+        }
+        final result = <String, dynamic>{
+          if (action == 'set_playback_mode')
+            'mode': input['mode']
+          else
+            'source': input['source'],
+        };
+        for (final key in ['expected_queue_id', 'start_track_id']) {
+          if (input[key] != null) {
+            if (input[key] is! String || (input[key] as String).isEmpty) {
+              throw ApiFailure('队列参数无效');
+            }
+            result[key] = input[key];
+          }
+        }
+        for (final key in [
+          'expected_queue_version',
+          'seed_song_id',
+          'song_id',
+          'start_index',
+        ]) {
+          if (input[key] != null) {
+            if (input[key] is! int ||
+                input[key] < 0 ||
+                ((key == 'song_id' || key == 'seed_song_id') &&
+                    input[key] == 0)) {
+              throw ApiFailure('队列数字参数无效');
+            }
+            result[key] = input[key];
+          }
+        }
+        return result;
       case 'set_loop':
         return {'loop_mode': loop(input['loop_mode'] ?? input['mode'])};
       case 'set_shuffle':
@@ -101,7 +174,37 @@ class MusicContract {
   }
 
   static Map<String, dynamic> statusPatch(Map raw) {
+    raw = envelope(raw);
     final result = <String, dynamic>{};
+    for (final field in ['applied_mode', 'requested_mode']) {
+      if (raw.containsKey(field) &&
+          (raw[field] == null || queueModes.contains(raw[field]))) {
+        result[field] = raw[field];
+      }
+    }
+    for (final field in [
+      'queue_id',
+      'queue_source',
+      'last_applied_command_id',
+      'error_code',
+    ]) {
+      if (raw.containsKey(field) &&
+          (raw[field] == null || raw[field] is String)) {
+        result[field] = raw[field];
+      }
+    }
+    for (final field in [
+      'queue_version',
+      'current_index',
+      'status_seq',
+      'consecutive_failures',
+    ]) {
+      if (raw[field] is int && raw[field] >= 0) result[field] = raw[field];
+    }
+    if (raw['capabilities'] is List &&
+        (raw['capabilities'] as List).every((v) => v is String)) {
+      result['capabilities'] = List<String>.from(raw['capabilities']);
+    }
     if (raw['device_id'] is String) result['device_id'] = raw['device_id'];
     if ({
       'playing',

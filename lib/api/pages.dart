@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'backend.dart';
-import 'contracts.dart';
+import 'music_queue_browser.dart';
 import 'login_page.dart';
 export 'music_home.dart' show MusicPage, MusicPlayerPage;
 import '../apple_map.dart';
@@ -725,7 +725,7 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
     final who = identity;
     setState(() => selecting = true);
     try {
-      await widget.session.playTrack(track);
+      await widget.session.playTrack(track, singleTrack: true);
       if (mounted && who == identity) {
         ScaffoldMessenger.of(
           context,
@@ -915,10 +915,11 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
     builder: (context, _) {
       final p = session.playback;
       final ready =
+          (session.queueV2Ready && session.ownerQueueAllowed) ||
           !session.playbackStale &&
-          session.heartbeatFresh &&
-          p['current_track_id'] is String &&
-          (p['current_track_id'] as String).isNotEmpty;
+              session.heartbeatFresh &&
+              p['current_track_id'] is String &&
+              (p['current_track_id'] as String).isNotEmpty;
       final locked =
           session.commandPending ||
           session.preparingTrack ||
@@ -935,11 +936,6 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
               rawVolume >= 0 &&
               rawVolume <= 1
           ? rawVolume.toDouble()
-          : null;
-      final mode =
-          ready &&
-              {'all', 'one', 'off', 'single', 'none'}.contains(p['loop_mode'])
-          ? MusicContract.loop(p['loop_mode'])
           : null;
       if (widget.immersive) {
         String clock(double ms) {
@@ -1005,7 +1001,8 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            QueueModeCaption(session: session),
+            const SizedBox(height: 8),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 3,
@@ -1050,30 +1047,9 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
               children: [
                 IconButton(
                   key: const ValueKey('player-loop'),
-                  tooltip: mode == null
-                      ? '循环模式未知'
-                      : mode == 'one'
-                      ? '单曲循环'
-                      : mode == 'off'
-                      ? '不循环'
-                      : '列表循环',
-                  onPressed: !enabled || mode == null
-                      ? null
-                      : () => command(context, 'set_loop', {
-                          'loop_mode': mode == 'all'
-                              ? 'one'
-                              : mode == 'one'
-                              ? 'off'
-                              : 'all',
-                        }),
-                  icon: Icon(
-                    mode == 'one'
-                        ? Icons.repeat_one
-                        : mode == 'off'
-                        ? Icons.repeat_on_outlined
-                        : Icons.repeat,
-                  ),
-                  color: mode == 'off' ? Colors.white54 : Colors.white,
+                  tooltip: '选择播放模式',
+                  onPressed: () => showQueueModes(context, session),
+                  icon: const Icon(Icons.repeat),
                   iconSize: 25,
                 ),
                 IconButton(
@@ -1257,36 +1233,7 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
           )
         else
           const Text('音量：未知/不可用，未采用默认值'),
-        DropdownButtonFormField<String>(
-          key: ValueKey(
-            '${mode}_${session.lastCommandState['command_id']}_${session.lastCommandState['status']}_${session.commandPending}',
-          ),
-          initialValue: mode,
-          decoration: const InputDecoration(labelText: '循环模式'),
-          hint: const Text('未知/不可用'),
-          items: const [
-            DropdownMenuItem(value: 'all', child: Text('列表循环')),
-            DropdownMenuItem(value: 'one', child: Text('单曲循环')),
-            DropdownMenuItem(value: 'off', child: Text('不循环')),
-          ],
-          onChanged: !ready || mode == null || locked
-              ? null
-              : (v) async {
-                  await command(context, 'set_loop', {'loop_mode': v});
-                  if (mounted) setState(() {});
-                },
-        ),
-        if (ready && p['shuffle_enabled'] is bool)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('随机播放'),
-            value: p['shuffle_enabled'] == true,
-            onChanged: !ready || p['shuffle_enabled'] is! bool || locked
-                ? null
-                : (v) => command(context, 'set_shuffle', {'shuffle': v}),
-          )
-        else
-          const Text('随机播放：未知/不可用'),
+        QueueModeCaption(session: session),
         Text(
           '目标：${session.api.deviceId} · command_id：${session.lastCommandState['command_id'] ?? '无'}',
         ),

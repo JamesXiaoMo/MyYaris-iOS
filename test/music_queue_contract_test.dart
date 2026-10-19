@@ -19,10 +19,14 @@ Map<String, dynamic> fixture(
   'tracks': List.generate(
     count,
     (i) => {
-      'id': offset + i + 1,
+      'song_id': offset + i + 1,
       'track_id': 'netease_${offset + i + 1}',
       'queue_index': offset + i,
-      'stream_url': 'http://127.0.0.1/example',
+      'stream_url': '/api/v1/music/netease/stream/${offset + i + 1}',
+      'title': '测试曲目',
+      'artist': '测试歌手',
+      'duration_ms': 1000,
+      'playable': null,
     },
   ),
 };
@@ -71,4 +75,20 @@ void main() {
       }
     },
   );
+  test('rejects local HTTP and foreign HTTPS stream locations', () {
+    for (final address in [
+      'http://127.0.0.1/a',
+      'https://foreign.example.test/api/v1/music/netease/stream/1',
+    ]) {
+      final page = fixture(0, 1);
+      (page['tracks'] as List).first['stream_url'] = address;
+      expect(
+        () => MusicQueuePage.fromJson(
+          page,
+          origin: Uri.parse('https://backend.example.test'),
+        ),
+        throwsA(isA<ApiFailure>()),
+      );
+    }
+  });
 }
