@@ -872,8 +872,15 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
 }
 
 class PlaybackPanel extends StatefulWidget {
-  const PlaybackPanel({super.key, required this.session});
+  const PlaybackPanel({
+    super.key,
+    required this.session,
+    this.immersive = false,
+    this.onSelectMusic,
+  });
   final BackendSession session;
+  final bool immersive;
+  final VoidCallback? onSelectMusic;
   @override
   State<PlaybackPanel> createState() => _PlaybackPanelState();
 }
@@ -934,6 +941,241 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
               {'all', 'one', 'off', 'single', 'none'}.contains(p['loop_mode'])
           ? MusicContract.loop(p['loop_mode'])
           : null;
+      if (widget.immersive) {
+        String clock(double ms) {
+          final seconds = ms ~/ 1000;
+          return '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
+        }
+
+        final enabled = ready && !locked;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session.homeMusicTitle,
+                        key: const ValueKey('player-track-title'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${session.currentTrack['artist'] ?? '歌手信息暂不可用'}',
+                        style: const TextStyle(
+                          fontSize: 17,
+                          color: Colors.white60,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Tooltip(
+                  message: '喜欢操作暂未接入',
+                  child: IconButton(
+                    onPressed: null,
+                    icon: Icon(Icons.favorite_border, color: Colors.white30),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Icon(
+                  Icons.directions_car_outlined,
+                  size: 18,
+                  color: Colors.white54,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '车机 · ${session.homeMusicState}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              ),
+              child: Slider(
+                key: const ValueKey('player-seek'),
+                value: seekKnown
+                    ? (seekDraft ?? position).clamp(0, duration).toDouble()
+                    : 0,
+                max: seekKnown ? duration : 1,
+                activeColor: const Color(0xFF8ADBE9),
+                inactiveColor: Colors.white24,
+                onChanged: !seekKnown || locked
+                    ? null
+                    : (v) => setState(() => seekDraft = v),
+                onChangeEnd: !seekKnown || locked
+                    ? null
+                    : (v) async {
+                        await command(context, 'seek', {'seek_ms': v.round()});
+                        if (mounted) setState(() => seekDraft = null);
+                      },
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  seekKnown ? clock(seekDraft ?? position) : '--:--',
+                  style: const TextStyle(color: Colors.white54),
+                ),
+                Text(
+                  seekKnown ? clock(duration) : '--:--',
+                  style: const TextStyle(color: Colors.white54),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  key: const ValueKey('player-loop'),
+                  tooltip: mode == null
+                      ? '循环模式未知'
+                      : mode == 'one'
+                      ? '单曲循环'
+                      : mode == 'off'
+                      ? '不循环'
+                      : '列表循环',
+                  onPressed: !enabled || mode == null
+                      ? null
+                      : () => command(context, 'set_loop', {
+                          'loop_mode': mode == 'all'
+                              ? 'one'
+                              : mode == 'one'
+                              ? 'off'
+                              : 'all',
+                        }),
+                  icon: Icon(
+                    mode == 'one'
+                        ? Icons.repeat_one
+                        : mode == 'off'
+                        ? Icons.repeat_on_outlined
+                        : Icons.repeat,
+                  ),
+                  color: mode == 'off' ? Colors.white54 : Colors.white,
+                  iconSize: 25,
+                ),
+                IconButton(
+                  tooltip: '上一曲',
+                  onPressed: enabled ? () => command(context, 'prev') : null,
+                  icon: const Icon(Icons.skip_previous_rounded),
+                  iconSize: 32,
+                ),
+                SizedBox(
+                  width: 76,
+                  height: 76,
+                  child: FilledButton(
+                    key: const ValueKey('player-toggle'),
+                    style: FilledButton.styleFrom(
+                      shape: const CircleBorder(),
+                      padding: EdgeInsets.zero,
+                      backgroundColor: const Color(0xFFFFF2E0),
+                      foregroundColor: const Color(0xFF19202E),
+                    ),
+                    onPressed: enabled
+                        ? () => command(
+                            context,
+                            session.playing ? 'pause' : 'resume',
+                          )
+                        : null,
+                    child: Icon(
+                      session.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 42,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '下一曲',
+                  onPressed: enabled ? () => command(context, 'next') : null,
+                  icon: const Icon(Icons.skip_next_rounded),
+                  iconSize: 32,
+                ),
+                IconButton(
+                  tooltip: '选择音乐',
+                  onPressed: widget.onSelectMusic,
+                  icon: const Icon(Icons.queue_music),
+                  iconSize: 25,
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('车机音量', style: TextStyle(color: Colors.white54)),
+                Text(
+                  ready && volume != null
+                      ? '${((volumeDraft ?? volume) * 100).round()}%'
+                      : '未知',
+                  style: const TextStyle(color: Colors.white54),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(
+                  Icons.volume_mute_outlined,
+                  size: 23,
+                  color: Colors.white60,
+                ),
+                Expanded(
+                  child: Slider(
+                    key: const ValueKey('player-volume'),
+                    value: ready && volume != null ? volumeDraft ?? volume : 0,
+                    activeColor: const Color(0xFF8ADBE9),
+                    inactiveColor: Colors.white24,
+                    onChanged: !enabled || volume == null
+                        ? null
+                        : (v) => setState(() => volumeDraft = v),
+                    onChangeEnd: !enabled || volume == null
+                        ? null
+                        : (v) async {
+                            await command(context, 'set_volume', {'volume': v});
+                            if (mounted) setState(() => volumeDraft = null);
+                          },
+                  ),
+                ),
+                const Icon(
+                  Icons.volume_up_outlined,
+                  size: 23,
+                  color: Colors.white60,
+                ),
+              ],
+            ),
+            if (locked || session.lastCommandState.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  session.preparingTrack ? '正在检查资源可播性…' : session.commandLabel,
+                  style: const TextStyle(fontSize: 12, color: Colors.white60),
+                ),
+              ),
+          ],
+        );
+      }
       return card([
         Text(
           '${session.currentTrack['title'] ?? p['current_track_id'] ?? '暂无播放曲目'}',

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'backend.dart';
 import 'netease_account_view.dart';
@@ -469,34 +470,376 @@ class _VinylPainter extends CustomPainter {
 class MusicPlayerPage extends StatelessWidget {
   const MusicPlayerPage({super.key, required this.session});
   final BackendSession session;
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('正在播放'),
-      actions: [
-        IconButton(
-          key: const ValueKey('music-player-search'),
-          tooltip: '搜索音乐',
-          onPressed: () => Navigator.push<void>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => MusicSearchPage(session: session),
-            ),
-          ),
-          icon: const Icon(Icons.search),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      top: false,
-      child: ListView(
+
+  void controls(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: const Color(0xFF151B27),
+    builder: (_) => SizedBox(
+      height: MediaQuery.sizeOf(context).height * .8,
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(22),
-        children: [
-          Center(child: VinylRecord(session: session, size: 240)),
-          const SizedBox(height: 24),
-          PlaybackPanel(session: session),
-        ],
+        child: Column(
+          children: [
+            const Text(
+              '更多控制与状态',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 18),
+            PlaybackPanel(session: session),
+          ],
+        ),
       ),
     ),
   );
+
+  Future<void> lyrics(BuildContext context, String songId) async {
+    final identity = '${session.api.baseUrl}\n${session.api.token}';
+    final track = session.playback['current_track_id'];
+    final future = session.api
+        .call('GET', '/api/v1/music/netease/lyric', query: {'song_id': songId})
+        .then<Map<String, dynamic>>(
+          (value) => value,
+          onError: (_) => <String, dynamic>{'_read_error': true},
+        );
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF151B27),
+      builder: (_) => SizedBox(
+        height: MediaQuery.sizeOf(context).height * .7,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const Text(
+                '歌词',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: future,
+                  builder: (context, snapshot) {
+                    if (identity !=
+                            '${session.api.baseUrl}\n${session.api.token}' ||
+                        track != session.playback['current_track_id']) {
+                      return const Center(child: Text('会话或曲目已切换，请关闭后重新打开'));
+                    }
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return const Center(child: Text('歌词读取失败，请关闭后重试'));
+                    }
+                    final data = snapshot.data ?? {};
+                    if (data['_read_error'] == true) {
+                      return const Center(child: Text('歌词读取失败，请关闭后重试'));
+                    }
+                    final value = data['lrc'] is String
+                        ? data['lrc']
+                        : data['lrc'] is Map
+                        ? (data['lrc'] as Map)['lyric']
+                        : data['lyric'];
+                    if (value is! String || value.trim().isEmpty) {
+                      return const Center(child: Text('当前曲目暂无歌词'));
+                    }
+                    final text = value
+                        .replaceAll(RegExp(r'\[[^\]]*\]'), '')
+                        .trim();
+                    return SingleChildScrollView(
+                      child: SelectableText(
+                        text,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          height: 2,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: session,
+    builder: (context, _) {
+      final artwork = musicArtworkUrl(session.currentTrack['cover_url']);
+      final songId =
+          session.currentTrack['song_id'] ??
+          (session.currentTrack['source'] == 'netease'
+              ? session.currentTrack['id']
+              : null);
+      return Scaffold(
+        backgroundColor: const Color(0xFF0B111E),
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: ClipRect(
+                child: RepaintBoundary(
+                  child: artwork == null || MediaQuery.highContrastOf(context)
+                      ? const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFF263345),
+                                Color(0xFF35282D),
+                                Color(0xFF0B111E),
+                              ],
+                            ),
+                          ),
+                        )
+                      : ImageFiltered(
+                          imageFilter: ui.ImageFilter.blur(
+                            sigmaX: 45,
+                            sigmaY: 45,
+                          ),
+                          child: Image.network(
+                            artwork.toString(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                const ColoredBox(color: Color(0xFF182031)),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x75101929),
+                      Color(0xA6101420),
+                      Color(0xF0080D15),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final size = math.min(
+                    390.0,
+                    math.max(
+                      220.0,
+                      math.min(
+                        constraints.maxWidth - 48,
+                        constraints.maxHeight * .4,
+                      ),
+                    ),
+                  );
+                  return SingleChildScrollView(
+                    key: const ValueKey('immersive-player-scroll'),
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              key: const ValueKey('player-dismiss'),
+                              tooltip: '返回音乐',
+                              onPressed: () => Navigator.maybePop(context),
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                size: 30,
+                              ),
+                            ),
+                            const Expanded(
+                              child: Column(
+                                children: [
+                                  Text(
+                                    'MY YARIS',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      letterSpacing: 5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  SizedBox(height: 5),
+                                  Text(
+                                    '正在播放',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.white54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuButton<int>(
+                              key: const ValueKey('music-player-search'),
+                              tooltip: '播放选项',
+                              icon: const Icon(Icons.more_horiz),
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 0, child: Text('搜索音乐')),
+                                PopupMenuItem(value: 1, child: Text('更多控制与状态')),
+                              ],
+                              onSelected: (item) {
+                                if (item == 0) {
+                                  Navigator.push<void>(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          MusicSearchPage(session: session),
+                                    ),
+                                  );
+                                } else {
+                                  controls(context);
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: size,
+                          height: size + 18,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: 12,
+                                child: VinylRecord(
+                                  session: session,
+                                  size: size,
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: const _PlayerTonearmPainter(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        PlaybackPanel(
+                          session: session,
+                          immersive: true,
+                          onSelectMusic: () => Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => LikedMusicPage(session: session),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            TextButton.icon(
+                              key: const ValueKey('player-lyrics'),
+                              onPressed: songId == null
+                                  ? null
+                                  : () => lyrics(context, '$songId'),
+                              icon: const Icon(Icons.music_note_outlined),
+                              label: const Text('歌词'),
+                            ),
+                            Tooltip(
+                              message: '当前车机未提供可切换音质',
+                              child: TextButton.icon(
+                                onPressed: null,
+                                icon: const Icon(Icons.graphic_eq),
+                                label: const Text('音质'),
+                              ),
+                            ),
+                            TextButton.icon(
+                              key: const ValueKey('player-more'),
+                              onPressed: () => controls(context),
+                              icon: const Icon(Icons.more_horiz),
+                              label: const Text('更多'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _PlayerTonearmPainter extends CustomPainter {
+  const _PlayerTonearmPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final start = Offset(size.width * .91, 0);
+    final bend = Offset(size.width * .89, size.height * .21);
+    final tip = Offset(size.width * .82, size.height * .38);
+    final path = Path()
+      ..moveTo(start.dx, start.dy)
+      ..lineTo(bend.dx, bend.dy)
+      ..lineTo(tip.dx, tip.dy);
+    canvas.drawPath(
+      path.shift(const Offset(3, 3)),
+      Paint()
+        ..color = Colors.black54
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 9
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFF626A77)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 7
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFFC0C5CE)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawCircle(start, 8, Paint()..color = const Color(0xFF454C58));
+    canvas.save();
+    canvas.translate(tip.dx, tip.dy);
+    canvas.rotate(.35);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(-6, -8, 12, 24),
+        const Radius.circular(3),
+      ),
+      Paint()..color = const Color(0xFF242B37),
+    );
+    canvas.drawLine(
+      const Offset(-5, 9),
+      const Offset(5, 9),
+      Paint()
+        ..color = const Color(0xFF8ADBE9)
+        ..strokeWidth = 2,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_PlayerTonearmPainter oldDelegate) => false;
 }
