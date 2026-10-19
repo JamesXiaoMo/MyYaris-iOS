@@ -254,7 +254,11 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
       if (first?.source != 'netease_favorite') {
         throw ApiFailure('请从我喜欢的音乐选择；当前队列点播路径尚未验收');
       }
-      await widget.session.playFavoriteTrack(track);
+      await widget.session.playFavoriteTrack(
+        track,
+        queueId: first!.id,
+        queueVersion: first!.version,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

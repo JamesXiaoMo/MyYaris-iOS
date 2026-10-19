@@ -51,6 +51,7 @@ class MusicContract {
           'netease_cache',
           'netease',
           'single_track',
+          'netease_favorite',
         }.contains(source)) {
           throw ApiFailure('曲目来源无效');
         }
@@ -62,10 +63,26 @@ class MusicContract {
                     input['expected_queue_version'] < 0))) {
           throw ApiFailure('队列前置条件无效');
         }
+        if (source == 'netease_favorite' &&
+            (input['queue_id'] is! String ||
+                (input['queue_id'] as String).isEmpty ||
+                input['queue_version'] is! int ||
+                input['queue_version'] <= 0 ||
+                (input['queue_index'] != null &&
+                    (input['queue_index'] is! int ||
+                        input['queue_index'] < 0)))) {
+          throw ApiFailure('喜欢快照标识或索引无效');
+        }
         return {
           'track_id': id,
           'stream_url': url.toString(),
           'source': source,
+          if (source == 'netease_favorite') ...{
+            'queue_id': input['queue_id'],
+            'queue_version': input['queue_version'],
+            if (input['queue_index'] != null)
+              'queue_index': input['queue_index'],
+          },
           if (input['expected_queue_id'] is String)
             'expected_queue_id': input['expected_queue_id'],
           if (input['expected_queue_version'] is int &&

@@ -57,6 +57,9 @@ class ApiFailure implements Exception {
 const queueErrorMessages = <String, String>{
   'PLAYBACK_CONSECUTIVE_FAILURES': '连续三首播放失败，请检查网络或网易云权限',
   'OWNER_QUEUE_PERMISSION_DENIED': '当前账号无Owner喜欢歌单权限，请使用管理员账号',
+  'TRACK_NOT_IN_QUEUE': '曲目不在指定喜欢快照内，请刷新后重选',
+  'QUEUE_SOURCE_MISMATCH': '指定快照不是喜欢歌单，未退为单曲',
+  'QUEUE_INDEX_MISMATCH': '曲目与快照索引不一致，请刷新后重选',
   'QUEUE_VERSION_CONFLICT': '队列版本已变化，请从第一页刷新，未混合分页',
   'QUEUE_PRECONDITION_FAILED': '车机队列已变化，请刷新后重新确认操作',
   'EMPTY_PLAYLIST': '我喜欢的音乐为空',
@@ -1688,53 +1691,89 @@ class BackendSession extends ChangeNotifier {
     await sendCommand('set_playback_mode', params);
   }
 
-  Future<void> playFavoriteTrack(Map<String, dynamic> track) async {
+  bool resolvingFavorite = false;
+
+  Future<void> playFavoriteTrack(
+    Map<String, dynamic> track, {
+    String? queueId,
+    int? queueVersion,
+  }) async {
     if (!canControlVehicle) throw ApiFailure('当前账号未授权目标车机');
     if (!ownerQueueAllowed) throw ApiFailure('当前账号无Owner喜欢歌单权限');
-    if (!hasAppliedQueue || playback['queue_source'] != 'netease_favorite') {
-      throw ApiFailure('喜欢歌单尚未由车机应用，暂不能从此处点歌，请等待队列就绪');
+    if (!queueV2Ready) {
+      throw ApiFailure(queueErrorMessages['CAPABILITY_NOT_SUPPORTED']!);
     }
-    final id = playback['queue_id'] as String,
-        version = playback['queue_version'] as int;
+    if (resolvingFavorite ||
+        preparingTrack ||
+        commandPending ||
+        awaitingExecution) {
+      throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
+    }
+    if ((queueId == null) != (queueVersion == null)) {
+      throw ApiFailure('浏览快照标识不完整');
+    }
     final who = '${api.baseUrl}\n${api.token}\n${api.deviceId}';
-    var offset = 0, found = false;
-    while (true) {
-      final page = await api.readMusicQueue(
-        queueId: id,
-        version: version,
-        offset: offset,
-      );
+    final actualId = hasAppliedQueue ? playback['queue_id'] : null;
+    final actualVersion = hasAppliedQueue ? playback['queue_version'] : null;
+    final song = api.songId(track);
+    var id = queueId, version = queueVersion, offset = 0;
+    Map<String, dynamic>? member;
+    final snapshot = MusicQueueAccumulator();
+    resolvingFavorite = true;
+    try {
+      while (true) {
+        final page = await api.readMusicQueue(
+          source: id == null ? 'netease_favorite' : null,
+          queueId: id,
+          version: version,
+          offset: offset,
+        );
+        if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
+            disposed ||
+            !foreground) {
+          throw ApiFailure('会话已切换，已丢弃旧队列');
+        }
+        if ((id != null && (page.id != id || page.version != version)) ||
+            page.source != 'netease_favorite' ||
+            page.offset != offset) {
+          throw ApiFailure('喜欢队列版本或来源变化，请刷新后重新选歌');
+        }
+        snapshot.add(page);
+        id = page.id;
+        version = page.version;
+        if (!page.established) throw ApiFailure('喜欢快照尚未完整建立，未发送选歌');
+        for (final row in page.tracks) {
+          if (row['song_id'] == song) {
+            member = row;
+            break;
+          }
+        }
+        if (member != null || !page.hasMore) break;
+        offset += page.tracks.length;
+        if (offset > 10000) throw ApiFailure('队列过大，请刷新后重试');
+      }
+      if (member == null) throw ApiFailure('该曲目不在喜欢快照内，请刷新，未退为单曲');
       if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
-          disposed ||
-          !foreground) {
-        throw ApiFailure('会话已切换，已丢弃旧队列');
+          (actualId != null &&
+              (playback['queue_id'] != actualId ||
+                  playback['queue_version'] != actualVersion))) {
+        throw ApiFailure('会话或实际队列已变化，未发送过期选歌');
       }
-      if (page.id != id ||
-          page.version != version ||
-          page.source != 'netease_favorite' ||
-          page.offset != offset) {
-        throw ApiFailure('喜欢队列版本变化，请刷新后重新选歌');
-      }
-      if (!page.established) throw ApiFailure('喜欢快照尚未完整建立，未发送选歌');
-      final song = track['song_id'] ?? track['id'];
-      found = page.tracks.any((t) => t['song_id'] == song);
-      if (found || !page.hasMore) break;
-      offset += page.tracks.length;
-      if (offset > 10000) throw ApiFailure('队列过大，请刷新后重试');
+      resolvingFavorite = false;
+      await playTrack(
+        member,
+        queueContext: {
+          'source': 'netease_favorite',
+          'queue_id': id,
+          'queue_version': version,
+          'queue_index': member['queue_index'],
+          'expected_queue_id': ?actualId,
+          'expected_queue_version': ?actualVersion,
+        },
+      );
+    } finally {
+      resolvingFavorite = false;
     }
-    if (!found) throw ApiFailure('该曲目不在车机已应用的喜欢快照内，请刷新，未退为单曲');
-    if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
-        playback['queue_id'] != id ||
-        playback['queue_version'] != version) {
-      throw ApiFailure('会话或队列已变化，未发送过期选歌');
-    }
-    await playTrack(
-      track,
-      queueContext: {
-        'expected_queue_id': id,
-        'expected_queue_version': version,
-      },
-    );
   }
 
   Future<void> playTrack(
@@ -1742,7 +1781,10 @@ class BackendSession extends ChangeNotifier {
     Map<String, dynamic> queueContext = const {},
     bool singleTrack = false,
   }) async {
-    if (preparingTrack || commandPending || awaitingExecution) {
+    if (resolvingFavorite ||
+        preparingTrack ||
+        commandPending ||
+        awaitingExecution) {
       throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
     }
     final origin = api.baseUrl, target = api.deviceId, credential = api.token;
@@ -1759,6 +1801,17 @@ class BackendSession extends ChangeNotifier {
           api.deviceId != target ||
           api.token != credential) {
         throw ApiFailure('App已离开前台或配置已改变，未发送过期选歌指令');
+      }
+      if (queueContext['source'] == 'netease_favorite' &&
+          (!ownerQueueAllowed || !queueV2Ready)) {
+        throw ApiFailure('喜欢队列权限或车机能力已变化，未发送选歌');
+      }
+      if (queueContext['source'] == 'netease_favorite' &&
+          queueContext['expected_queue_id'] != null &&
+          (playback['queue_id'] != queueContext['expected_queue_id'] ||
+              playback['queue_version'] !=
+                  queueContext['expected_queue_version'])) {
+        throw ApiFailure('实际队列已变化，未发送过期喜欢点歌');
       }
       await sendCommand('play_track', {
         ...api.trackParams(track),

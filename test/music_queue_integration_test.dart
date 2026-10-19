@@ -37,6 +37,19 @@ Map<String, dynamic> actual({String mode = 'list_loop', int seq = 10}) {
   };
 }
 
+class QueueProbeApi extends BackendApi {
+  QueueProbeApi(http.Client client)
+    : super(baseUrl: 'https://backend.example.test', client: client);
+  int probes = 0;
+  @override
+  Future<Map<String, dynamic>> ensureOnlinePlayable(
+    Map<String, dynamic> track,
+  ) async {
+    probes++;
+    return {'status': 'playable'};
+  }
+}
+
 void main() {
   test('device permission blocks queue actions before any request', () async {
     var requests = 0;
@@ -124,22 +137,231 @@ void main() {
       );
     },
   );
+  for (final activeSingle in [false, true]) {
+    test(
+      'cold snapshot to one favorite intent, active single=$activeSingle',
+      () async {
+        final requests = <http.Request>[];
+        final api = QueueProbeApi(
+          MockClient((r) async {
+            requests.add(r);
+            if (r.method == 'GET') return reply(fixture(0, 50));
+            final body = jsonDecode(r.body);
+            return reply({
+              'command_id': body['command_id'],
+              'lifecycle_status': 'queued',
+            });
+          }),
+        )..token = 'fixture';
+        final s = FixtureSession(api: api)..userProfile = {'role': 'admin'};
+        addTearDown(s.dispose);
+        s.playback = actual();
+        if (activeSingle) {
+          s.playback.addAll({
+            'queue_id': 'actual-single',
+            'queue_version': 9,
+            'queue_source': 'single_track',
+          });
+        } else {
+          s.playback.remove('queue_id');
+          s.playback.remove('queue_version');
+          s.playback.remove('queue_source');
+        }
+        await s.playFavoriteTrack({'song_id': 1});
+        expect(requests.where((r) => r.method == 'POST').length, 1);
+        expect(
+          requests.first.url.queryParameters['source'],
+          'netease_favorite',
+        );
+        final body = jsonDecode(requests.last.body);
+        expect(body['action'], 'play_track');
+        final params = body['params'];
+        expect(params['source'], 'netease_favorite');
+        expect(params['queue_id'], 'fixture-queue');
+        expect(params['queue_version'], 1);
+        expect(params['queue_index'], 0);
+        expect(params['song_id'], 1);
+        expect(
+          params['expected_queue_id'],
+          activeSingle ? 'actual-single' : null,
+        );
+        expect(params['expected_queue_version'], activeSingle ? 9 : null);
+        expect(s.playback['queue_id'], activeSingle ? 'actual-single' : null);
+        expect(api.probes, 1);
+      },
+    );
+  }
+  for (final pair in {
+    409: 'QUEUE_VERSION_CONFLICT',
+    404: 'TRACK_NOT_IN_QUEUE',
+    422: 'QUEUE_INDEX_MISMATCH',
+    403: 'OWNER_QUEUE_PERMISSION_DENIED',
+  }.entries) {
+    test(
+      'favorite server error ${pair.key} never falls back or retries',
+      () async {
+        var posts = 0;
+        final api = QueueProbeApi(
+          MockClient((r) async {
+            if (r.method == 'GET') return reply(fixture(0, 50));
+            posts++;
+            return reply({
+              'detail': {'error_code': pair.value},
+            }, pair.key);
+          }),
+        )..token = 'fixture';
+        final s = FixtureSession(api: api)..userProfile = {'role': 'admin'};
+        addTearDown(s.dispose);
+        s.playback = actual();
+        await expectLater(
+          s.playFavoriteTrack({'song_id': 1}),
+          throwsA(
+            isA<ApiFailure>().having((e) => e.errorCode, 'code', pair.value),
+          ),
+        );
+        expect(posts, 1);
+        expect(s.playback['queue_id'], 'fixture-queue');
+      },
+    );
+  }
   test(
-    'cold favorite point play fails before probe, metadata request or command',
+    'favorite lookup duplicate blocked, late account response sends zero commands',
     () async {
-      var requests = 0;
-      final s = sessionWith(
-        MockClient((_) async {
-          requests++;
+      final pending = Completer<http.Response>();
+      var gets = 0, posts = 0;
+      final api = QueueProbeApi(
+        MockClient((r) async {
+          if (r.method == 'GET') {
+            gets++;
+            return pending.future;
+          }
+          posts++;
           return reply({});
         }),
-      );
+      )..token = 'fixture';
+      final s = FixtureSession(api: api)..userProfile = {'role': 'admin'};
       addTearDown(s.dispose);
+      s.playback = actual();
+      final first = s.playFavoriteTrack(
+        {'song_id': 1},
+        queueId: 'fixture-queue',
+        queueVersion: 1,
+      );
+      final rejected = expectLater(first, throwsA(isA<ApiFailure>()));
       await expectLater(
         s.playFavoriteTrack({'song_id': 1}),
         throwsA(isA<ApiFailure>()),
       );
-      expect(requests, 0);
+      api.token = 'other-fixture';
+      pending.complete(reply(fixture(0, 50)));
+      await rejected;
+      expect(gets, 1);
+      expect(posts, 0);
+      expect(api.probes, 0);
+    },
+  );
+  test('favorite non-member and source mismatch send no command', () async {
+    for (final wrongSource in [false, true]) {
+      var posts = 0;
+      final api = QueueProbeApi(
+        MockClient((r) async {
+          if (r.method == 'POST') {
+            posts++;
+            return reply({});
+          }
+          final data = fixture(0, 50);
+          if (wrongSource) {
+            data['source'] = 'single_track';
+          } else {
+            data['total'] = 50;
+            data['has_more'] = false;
+          }
+          return reply(data);
+        }),
+      )..token = 'fixture';
+      final s = FixtureSession(api: api)..userProfile = {'role': 'admin'};
+      s.playback = actual();
+      await expectLater(
+        s.playFavoriteTrack({'song_id': 999}),
+        throwsA(isA<ApiFailure>()),
+      );
+      expect(posts, 0);
+      expect(api.probes, 0);
+      s.dispose();
+    }
+  });
+  test(
+    'pinned browser snapshot keeps identity through member pagination',
+    () async {
+      final requests = <http.Request>[];
+      final api = QueueProbeApi(
+        MockClient((r) async {
+          requests.add(r);
+          if (r.method == 'GET') {
+            expect(r.url.queryParameters['queue_id'], 'fixture-queue');
+            expect(r.url.queryParameters['queue_version'], '1');
+            final offset = int.parse(r.url.queryParameters['offset']!);
+            return reply(fixture(offset, offset == 0 ? 50 : 15));
+          }
+          final b = jsonDecode(r.body);
+          return reply({
+            'command_id': b['command_id'],
+            'lifecycle_status': 'queued',
+          });
+        }),
+      )..token = 'fixture';
+      final s = FixtureSession(api: api)..userProfile = {'role': 'admin'};
+      addTearDown(s.dispose);
+      s.playback = actual();
+      await s.playFavoriteTrack(
+        {'song_id': 65},
+        queueId: 'fixture-queue',
+        queueVersion: 1,
+      );
+      expect(requests.length, 3);
+      expect(jsonDecode(requests.last.body)['params']['queue_index'], 64);
+      await expectLater(
+        s.playFavoriteTrack({'song_id': 65}),
+        throwsA(isA<ApiFailure>()),
+      );
+      expect(requests.length, 3);
+    },
+  );
+  test(
+    'favorite target schema validates index and separates actual precondition',
+    () {
+      final params = {
+        'track_id': 'netease_1',
+        'song_id': 1,
+        'source': 'netease_favorite',
+        'stream_url':
+            'https://backend.example.test/api/v1/music/netease/stream/1',
+        'queue_id': 'browse',
+        'queue_version': 8,
+        'queue_index': 0,
+        'expected_queue_id': 'actual',
+        'expected_queue_version': 3,
+      };
+      final validated = MusicContract.params(
+        'play_track',
+        params,
+        Uri.parse('https://backend.example.test'),
+      );
+      expect(validated['queue_id'], 'browse');
+      expect(validated['expected_queue_id'], 'actual');
+      for (final patch in [
+        {'queue_version': 0},
+        {'queue_id': ''},
+        {'queue_index': -1},
+      ]) {
+        expect(
+          () => MusicContract.params('play_track', {
+            ...params,
+            ...patch,
+          }, Uri.parse('https://backend.example.test')),
+          throwsA(isA<ApiFailure>()),
+        );
+      }
     },
   );
   test(
