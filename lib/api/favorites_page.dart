@@ -226,6 +226,12 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
         widget.item?.longitude.toString() ??
         widget.initialSelection?.longitude.toString(),
   );
+  final plusCode = TextEditingController();
+  final referenceLatitude = TextEditingController();
+  final referenceLongitude = TextEditingController();
+  bool get shortCode =>
+      plusCode.text.contains('+') && plusCode.text.indexOf('+') < 8;
+  bool usePlusCode = false;
   bool busy = false,
       uncertain = false,
       folderChanged = false,
@@ -260,22 +266,72 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
     address.dispose();
     latitude.dispose();
     longitude.dispose();
+    plusCode.dispose();
+    referenceLatitude.dispose();
+    referenceLongitude.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
     if (busy || uncertain) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
+      if (usePlusCode) {
+        Map<String, double>? reference;
+        if (shortCode) {
+          final lat = double.tryParse(referenceLatitude.text.trim()),
+              lon = double.tryParse(referenceLongitude.text.trim());
+          if (lat == null ||
+              lon == null ||
+              !lat.isFinite ||
+              !lon.isFinite ||
+              lat.abs() > 90 ||
+              lon.abs() > 180) {
+            throw ApiFailure('请填写有效WGS84参考纬度和经度');
+          }
+          reference = {'latitude': lat, 'longitude': lon};
+        }
+        final point = await widget.service.resolvePlusCode(
+          plusCode.text,
+          reference: reference,
+        );
+        if (!mounted) return;
+        if (shortCode) {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialog) => AlertDialog(
+              key: const ValueKey('favorite-short-code-confirm'),
+              title: const Text('确认短码解析位置'),
+              content: Text(
+                '参考：${reference!['latitude']}, ${reference['longitude']}\n解析位置：${point['latitude']}, ${point['longitude']}\n是否将此位置保存为收藏？',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  key: const ValueKey('favorite-short-code-save'),
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: const Text('确认保存'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed != true || !mounted) return;
+        }
+        latitude.text = '${point['latitude']}';
+        longitude.text = '${point['longitude']}';
+      }
       final body = Favorite.validate(
         name.text,
         address.text,
         latitude.text,
         longitude.text,
       );
-      setState(() {
-        busy = true;
-        error = null;
-      });
       if (folderChanged || widget.item == null) body['folder_id'] = folderId;
       await widget.service.save(body, id: widget.item?.id);
       if (mounted) Navigator.pop(context, true);
@@ -314,31 +370,93 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
               key: const ValueKey('favorite-address'),
               controller: address,
               enabled: !busy,
-              decoration: const InputDecoration(labelText: '地址'),
+              decoration: const InputDecoration(labelText: '显示地址（选填）'),
               maxLines: 2,
             ),
-            TextField(
-              key: const ValueKey('favorite-latitude'),
-              controller: latitude,
-              enabled: !busy,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: true,
-              ),
-              decoration: const InputDecoration(labelText: 'WGS84 纬度（-90～90）'),
+            const SizedBox(height: 12),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('经纬度')),
+                ButtonSegment(value: true, label: Text('Plus Code')),
+              ],
+              selected: {usePlusCode},
+              onSelectionChanged: busy || uncertain
+                  ? null
+                  : (values) => setState(() => usePlusCode = values.single),
             ),
-            TextField(
-              key: const ValueKey('favorite-longitude'),
-              controller: longitude,
-              enabled: !busy,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-                signed: true,
+            if (usePlusCode) ...[
+              TextField(
+                key: const ValueKey('favorite-plus-code'),
+                controller: plusCode,
+                enabled: !busy && !uncertain,
+                textCapitalization: TextCapitalization.characters,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Plus Code',
+                  hintText: '例如 849VCWC8+R9',
+                ),
               ),
-              decoration: const InputDecoration(
-                labelText: 'WGS84 经度（-180～180）',
+              if (shortCode) ...[
+                const Text('短码参考位置（WGS84）'),
+                TextField(
+                  key: const ValueKey('favorite-reference-latitude'),
+                  controller: referenceLatitude,
+                  enabled: !busy,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(labelText: '参考纬度'),
+                ),
+                TextField(
+                  key: const ValueKey('favorite-reference-longitude'),
+                  controller: referenceLongitude,
+                  enabled: !busy,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(labelText: '参考经度'),
+                ),
+                if (widget.initialSelection != null)
+                  TextButton(
+                    onPressed: busy
+                        ? null
+                        : () => setState(() {
+                            referenceLatitude.text =
+                                '${widget.initialSelection!.latitude}';
+                            referenceLongitude.text =
+                                '${widget.initialSelection!.longitude}';
+                          }),
+                    child: const Text('使用所选地图点作为参考'),
+                  ),
+              ],
+            ] else ...[
+              TextField(
+                key: const ValueKey('favorite-latitude'),
+                controller: latitude,
+                enabled: !busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'WGS84 纬度（-90～90）',
+                ),
               ),
-            ),
+              TextField(
+                key: const ValueKey('favorite-longitude'),
+                controller: longitude,
+                enabled: !busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'WGS84 经度（-180～180）',
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               key: ValueKey(
@@ -373,7 +491,7 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
                 onPressed: loadFolders,
                 child: Text('分类加载失败，点击重试：$folderError'),
               ),
-            const Text('仅保存收藏，不解析或发送导航'),
+            const Text('仅保存收藏，不发送导航'),
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
             if (busy) const LinearProgressIndicator(),

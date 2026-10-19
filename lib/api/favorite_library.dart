@@ -68,7 +68,7 @@ class FavoriteLibrary extends ChangeNotifier {
     changed();
     try {
       final values = await Future.wait<Object>([
-        service.page(folderId: folderId, search: search),
+        service.page(folderId: folderId ?? 'uncategorized', search: search),
         service.folders(search: folderId == null ? search : ''),
         if (folderId != null && folderId != 'uncategorized')
           service.getFolder(folderId!),
@@ -135,7 +135,7 @@ class FavoriteLibrary extends ChangeNotifier {
       } else {
         final page = await service.page(
           offset: offset,
-          folderId: folderId,
+          folderId: folderId ?? 'uncategorized',
           search: search,
         );
         if (!valid(gen, who)) return;

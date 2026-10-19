@@ -209,13 +209,19 @@ class BackendApi {
 
   Future<Map<String, dynamic>> resolveDestination(
     String input,
-    String key,
-  ) async {
+    String key, {
+    Map<String, double>? reference,
+  }) async {
     await ensureResolveOnlyContract();
     final result = await call(
       'POST',
       '/api/v1/destinations/resolve',
-      body: {'raw_input': input, 'source': 'ios_share'},
+      body: {
+        'raw_input': input,
+        'source': 'ios_share',
+        if (reference != null)
+          'reference_coordinate': {...reference, 'coord_system': 'wgs84'},
+      },
     );
     if (result['task_id'] != null) {
       throw ApiFailure('解析阶段意外生成任务，已停止后续派发，请核对后端契约');

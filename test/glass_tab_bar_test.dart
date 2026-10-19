@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myyaris_ios/glass_tab_bar.dart';
 import 'package:myyaris_ios/main.dart';
+import 'package:myyaris_ios/apple_map.dart';
 import 'package:myyaris_ios/api/driving_favorites_drawer.dart';
 import 'package:myyaris_ios/api/music_home.dart' show VinylRecord;
 import 'package:myyaris_ios/api/login_page.dart';
@@ -268,7 +269,7 @@ void main() {
   );
 
   testWidgets(
-    'shell preserves input across click and drag; keyboard hides bar; login has no tabs',
+    'shell preserves selected point across click and drag; keyboard hides bar; login has no tabs',
     (tester) async {
       final session = FixtureSession();
       addTearDown(session.dispose);
@@ -280,14 +281,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tab-1')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
+      tester
+          .widget<AppleMap>(find.byType(AppleMap))
+          .onSelected(const MapSelection(34.4, 132.4));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('destination-input')),
-        '34.4,132.4',
-      );
       await tester.tap(find.text('取消'));
-      FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tab-2')));
       await tester.pumpAndSettle();
@@ -297,17 +295,13 @@ void main() {
             tester.getCenter(find.byKey(const ValueKey('tab-2'))),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
-      await tester.pumpAndSettle();
+      final point = tester.widget<AppleMap>(find.byType(AppleMap)).selection!;
+      expect(point.latitude, 34.4);
+      expect(point.longitude, 132.4);
       expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('destination-input')))
-            .controller!
-            .text,
-        '34.4,132.4',
+        find.byKey(const ValueKey('destination-input-open')),
+        findsNothing,
       );
-      await tester.tap(find.text('取消'));
-      await tester.pumpAndSettle();
       tester.view.viewInsets = const FakeViewPadding(bottom: 260);
       addTearDown(tester.view.resetViewInsets);
       await tester.pumpAndSettle();

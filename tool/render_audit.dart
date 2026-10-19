@@ -98,16 +98,11 @@ Future<void> main() async {
     }
     await controller.tap(find.byKey(const ValueKey('tab-1')));
     await controller.pump(const Duration(milliseconds: 100));
-    final input = controller.widget<TextField>(
-      find.byKey(const ValueKey('destination-input')),
-    );
-    input.controller!.text = '34.39,132.45';
-    await controller.tap(find.byKey(const ValueKey('destination-preview')));
-    await controller.pump(const Duration(milliseconds: 100));
-    if (find.textContaining('请先在设置中配置手机 Token').evaluate().length != 1) {
-      errors.add(
-        'unconfigured request must be rejected before network for $size',
-      );
+    if (find
+        .byKey(const ValueKey('destination-input-open'))
+        .evaluate()
+        .isNotEmpty) {
+      errors.add('removed manual destination entry must not be visible');
     }
     stdout.writeln('layout and four tabs verified: $size');
   }

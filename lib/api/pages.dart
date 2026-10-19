@@ -259,9 +259,9 @@ class _NavigationPageState extends State<NavigationPage> {
         if (candidates.length == 1 &&
             candidates.single['candidate_id'] is String &&
             query?['task_id'] == null) {
-          await send(
+          await _sendPointCandidate(
             candidates.single['candidate_id'] as String,
-            confirmedPoint: point,
+            point,
           );
         } else {
           error = '解析结果与确认的选点不一致或尚未完成，未派发。请重新选择目的地';
@@ -300,45 +300,6 @@ class _NavigationPageState extends State<NavigationPage> {
       return;
     }
     if (point != null) selectPoint(point);
-  }
-
-  Future<void> enterDestination() async {
-    await showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('输入目的地'),
-        content: TextField(
-          key: const ValueKey('destination-input'),
-          controller: input,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: '坐标 / Plus Code / 地图链接 / 地址',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() => mapSelection = null);
-              resolve();
-            },
-            child: const Text('解析目的地'),
-          ),
-        ],
-      ),
-    );
-    if (mounted && drawer.isAttached) {
-      drawer.animateTo(
-        _sheetSize(.70),
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    }
   }
 
   @override
@@ -492,21 +453,14 @@ class _NavigationPageState extends State<NavigationPage> {
     }
   }
 
-  Future<void> send(String? candidate, {MapSelection? confirmedPoint}) async {
-    if (busy || candidate == null) return;
-    if (confirmedPoint != null &&
-        !((query?['candidates'] as List?) ?? []).whereType<Map>().any(
-          (c) =>
-              c['candidate_id'] == candidate && _samePoint(c, confirmedPoint),
-        )) {
-      return;
-    }
-    if (confirmedPoint == null &&
-        !await confirmAction(
-          context,
-          '发送确认后的目的地',
-          '将所选候选发送到 ${widget.session.api.deviceId}。任务提交不等于已开始导航。',
-        )) {
+  Future<void> _sendPointCandidate(
+    String candidate,
+    MapSelection confirmedPoint,
+  ) async {
+    if (busy) return;
+    if (!((query?['candidates'] as List?) ?? []).whereType<Map>().any(
+      (c) => c['candidate_id'] == candidate && _samePoint(c, confirmedPoint),
+    )) {
       return;
     }
     if (!mounted) return;
@@ -557,92 +511,6 @@ class _NavigationPageState extends State<NavigationPage> {
 
   @override
   Widget build(BuildContext context) {
-    final candidates = (query?['candidates'] as List?) ?? [];
-
-    final panel = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (mapSelection != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              '${mapSelection!.title}\nWGS84 纬度 ${mapSelection!.latitude.toStringAsFixed(6)} · 经度 ${mapSelection!.longitude.toStringAsFixed(6)}',
-            ),
-          ),
-        FilledButton.icon(
-          key: const ValueKey('destination-preview'),
-          onPressed: busy || resolved != null ? null : resolve,
-          icon: const Icon(Icons.place_outlined),
-          label: Text(busy ? '处理中…' : '解析目的地'),
-        ),
-        if (error != null)
-          Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
-        if (resolved != null)
-          card([
-            const Text(
-              '解析结果与派发状态',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            if (query?['task_id'] != null)
-              const Text('已存在任务，不会再次派发；请查看回执。')
-            else if (query == null)
-              const Text('解析请求已提交，但未能查询派发状态。请重新查询，不要重复提交。')
-            else if (candidates.isNotEmpty)
-              ...candidates.map(
-                (c) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${c['title']}'),
-                  subtitle: Text(
-                    '${c['address'] ?? ''}\n${c['latitude']}, ${c['longitude']}',
-                  ),
-                  trailing: const Icon(Icons.send),
-                  onTap: busy ? null : () => send('${c['candidate_id']}'),
-                ),
-              )
-            else ...[
-              Text(
-                '${resolved!['name']}\n${resolved!['latitude']}, ${resolved!['longitude']}',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '未得到可靠候选，请换用完整坐标或更明确的地址。不会派发占位坐标。',
-                style: TextStyle(color: Colors.orangeAccent),
-              ),
-            ],
-          ]),
-        if (resolved != null)
-          Wrap(
-            children: [
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () async {
-                        setState(() => busy = true);
-                        try {
-                          await loadResolved();
-                        } catch (e) {
-                          if (mounted) setState(() => error = e.toString());
-                        } finally {
-                          if (mounted) setState(() => busy = false);
-                        }
-                      },
-                child: const Text('重新查询解析 / 派发状态'),
-              ),
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => setState(() {
-                        resolved = null;
-                        query = null;
-                        error = null;
-                      }),
-                child: const Text('准备新的目的地'),
-              ),
-            ],
-          ),
-      ],
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -711,13 +579,6 @@ class _NavigationPageState extends State<NavigationPage> {
                       session: widget.session,
                       controller: scroll,
                       selection: mapSelection,
-                      destinationPanel:
-                          (mapSelection == null &&
-                              (input.text.trim().isNotEmpty ||
-                                  resolved != null))
-                          ? panel
-                          : const SizedBox.shrink(),
-                      onInput: enterDestination,
                       onSelected: (favorite) => selectPoint(
                         MapSelection(
                           favorite.latitude,

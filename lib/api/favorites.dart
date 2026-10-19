@@ -13,7 +13,11 @@ class Favorite {
   });
   final String id, name, address, coordSystem;
   final String? folderId, folderName;
-  String get displayName => name.isEmpty ? address : name;
+  String get displayName => name.isNotEmpty
+      ? name
+      : address.isNotEmpty
+      ? address
+      : coordinates;
   final double latitude, longitude;
   static Map<String, dynamic> validate(
     String name,
@@ -23,8 +27,8 @@ class Favorite {
   ) {
     final lat = double.tryParse(latitude.trim());
     final lon = double.tryParse(longitude.trim());
-    if (address.trim().isEmpty || address.trim().runes.length > 512) {
-      throw ApiFailure('请填写1～512字的地址');
+    if (address.trim().runes.length > 512) {
+      throw ApiFailure('显示地址不能超过512字');
     }
     if (name.trim().runes.length > 128) {
       throw ApiFailure('名称不能超过128字');
@@ -49,7 +53,7 @@ class Favorite {
     if (json['id'] is! String ||
         (json['id'] as String).isEmpty ||
         (json['name'] != null && json['name'] is! String) ||
-        json['address'] is! String ||
+        (json['address'] != null && json['address'] is! String) ||
         lat is! num ||
         lon is! num) {
       throw ApiFailure('收藏夹响应格式不符');
@@ -59,14 +63,13 @@ class Favorite {
         lat > 90 ||
         !lon.isFinite ||
         lon < -180 ||
-        lon > 180 ||
-        (json['address'] as String).trim().isEmpty) {
-      throw ApiFailure('收藏夹坐标或地址无效');
+        lon > 180) {
+      throw ApiFailure('收藏夹坐标无效');
     }
     return Favorite(
       id: '${json['id']}',
       name: json['name'] ?? '',
-      address: json['address'],
+      address: json['address'] ?? '',
       latitude: lat.toDouble(),
       longitude: lon.toDouble(),
       coordSystem: '${json['coord_system'] ?? 'wgs84'}',
@@ -167,6 +170,82 @@ class FavoritesApi {
       }
       rethrow;
     }
+  }
+
+  Future<Map<String, double>> resolvePlusCode(
+    String raw, {
+    Map<String, double>? reference,
+  }) async {
+    final code = raw.trim().toUpperCase();
+    final separator = code.indexOf('+');
+    final short = separator >= 0 && separator < 8;
+    if (!RegExp(
+          r'^[23456789CFGHJMPQRVWX0]{0,8}\+[23456789CFGHJMPQRVWX]{0,7}$',
+        ).hasMatch(code) ||
+        separator < 0 ||
+        separator.isOdd ||
+        (short && code.length - separator < 3)) {
+      throw ApiFailure('请输入有效Plus Code，不能用城市名称代替参考坐标');
+    }
+    if (short &&
+        (reference == null ||
+            reference['latitude'] == null ||
+            reference['longitude'] == null ||
+            !reference['latitude']!.isFinite ||
+            !reference['longitude']!.isFinite ||
+            reference['latitude']!.abs() > 90 ||
+            reference['longitude']!.abs() > 180)) {
+      throw ApiFailure('短Plus Code需要明确WGS84参考纬度和经度，不能自动猜测位置');
+    }
+    if (!current) throw ApiFailure('账号或服务已切换，请重新打开收藏');
+    final transport = BackendApi(client: api.client, baseUrl: _origin)
+      ..token = _token
+      ..isUserSession = api.isUserSession
+      ..onSessionExpired = () async {
+        if (current) await api.onSessionExpired?.call();
+      };
+    if (short) {
+      final spec = await transport.call('GET', '/openapi.json', auth: false);
+      if ((spec['components']
+              as Map?)?['schemas']?['DestinationResolveRequest']?['properties']?['reference_coordinate'] ==
+          null) {
+        throw ApiFailure('当前后端尚未支持短码参考位置，请等待更新或使用完整Plus Code');
+      }
+    }
+    final result = await transport.resolveDestination(
+      code,
+      requestId(),
+      reference: short ? reference : null,
+    );
+    if (!current) throw ApiFailure('账号或服务已切换，已丢弃解析结果');
+    final id = result['destination_id'] ?? result['request_id'];
+    if (id is! String || id.isEmpty) throw ApiFailure('Plus Code解析引用缺失，未保存');
+    final query = await call('GET', '/destinations/${Uri.encodeComponent(id)}');
+    if (query['task_id'] != null) throw ApiFailure('收藏解析意外关联导航任务，已阻止保存并停止后续操作');
+    if (!short &&
+        (result['needs_confirmation'] == true ||
+            query['status'] == 'needs_clarification')) {
+      throw ApiFailure('解析需要更多位置确认，未保存收藏');
+    }
+    final candidates = query['candidates'];
+    if (candidates is! List ||
+        candidates.length != 1 ||
+        candidates.single is! Map) {
+      throw ApiFailure('Plus Code未得到唯一有效坐标，未保存收藏');
+    }
+    final candidate = candidates.single as Map;
+    final lat = candidate['latitude'], lon = candidate['longitude'];
+    if (lat is! num ||
+        lon is! num ||
+        !lat.isFinite ||
+        !lon.isFinite ||
+        lat.abs() > 90 ||
+        lon.abs() > 180 ||
+        (candidate['coord_system'] != null &&
+            candidate['coord_system'] != 'wgs84')) {
+      throw ApiFailure('Plus Code解析坐标无效或非WGS84，未保存');
+    }
+    return {'latitude': lat.toDouble(), 'longitude': lon.toDouble()};
   }
 
   FavoritePage<T> parse<T>(

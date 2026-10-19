@@ -13,16 +13,12 @@ class DrivingFavoritesDrawer extends StatefulWidget {
     required this.session,
     required this.controller,
     required this.onSelected,
-    required this.onInput,
     this.selection,
-    required this.destinationPanel,
   });
   final BackendSession session;
   final ScrollController controller;
   final ValueChanged<Favorite> onSelected;
-  final VoidCallback onInput;
   final MapSelection? selection;
-  final Widget destinationPanel;
   @override
   State<DrivingFavoritesDrawer> createState() => _DrivingFavoritesDrawerState();
 }
@@ -282,12 +278,6 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
-              TextButton.icon(
-                key: const ValueKey('destination-input-open'),
-                onPressed: widget.onInput,
-                icon: const Icon(Icons.edit_location_alt_outlined),
-                label: const Text('输入目的地'),
-              ),
               IconButton(
                 tooltip: '刷新收藏',
                 onPressed: locked ? null : library.refresh,
@@ -314,7 +304,6 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
               ),
             ],
           ),
-          widget.destinationPanel,
           if (locked) const LinearProgressIndicator(),
           if (library.error != null) ...[
             Text(
@@ -347,14 +336,26 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
           if (!library.busy && library.error == null && library.items.isEmpty)
             Padding(
               padding: const EdgeInsets.all(20),
-              child: Text(library.search.isEmpty ? '暂无收藏，点击＋添加地址' : '没有匹配的收藏'),
+              child: Text(
+                library.search.isEmpty
+                    ? (selected == null && library.folders.isNotEmpty
+                          ? '暂无未分类地址'
+                          : '暂无收藏，点击＋添加地址')
+                    : (selected == null && library.folders.isNotEmpty
+                          ? '没有匹配的未分类地址'
+                          : '没有匹配的收藏'),
+              ),
             ),
           for (final item in library.items)
             ListTile(
               leading: const Icon(Icons.place_outlined),
               title: Text(item.displayName),
               subtitle: Text(
-                '${item.folderName == null ? '' : '${item.folderName} · '}${item.address}',
+                [
+                  if (item.folderName?.isNotEmpty == true) item.folderName!,
+                  if (item.address.isNotEmpty) item.address,
+                  if (item.address.isEmpty) item.coordinates,
+                ].join(' · '),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),

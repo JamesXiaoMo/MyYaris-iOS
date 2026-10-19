@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:myyaris_ios/api/backend.dart';
 import 'package:myyaris_ios/api/favorites.dart';
 import 'package:myyaris_ios/main.dart';
+import 'package:myyaris_ios/apple_map.dart';
 import 'widget_test.dart' show FixtureSession;
 
 http.Response jsonResponse(String body, int status) => http.Response(
@@ -16,7 +17,7 @@ http.Response jsonResponse(String body, int status) => http.Response(
 
 void main() {
   test(
-    'WGS84 valid boundary and invalid finite/range/empty address checks',
+    'WGS84 valid boundary and invalid finite/range/optional address checks',
     () {
       expect(Favorite.validate('', ' 极点 ', '-90', '180'), {
         'name': null,
@@ -38,10 +39,7 @@ void main() {
           throwsA(isA<ApiFailure>()),
         );
       }
-      expect(
-        () => Favorite.validate('家', ' ', '34', '132'),
-        throwsA(isA<ApiFailure>()),
-      );
+      expect(Favorite.validate('家', ' ', '34', '132')['address'], '');
       expect(
         Favorite.fromJson({
           'id': 'x',
@@ -202,12 +200,13 @@ void main() {
       expect(writes, isEmpty);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('destination-input-open')));
-      await tester.pumpAndSettle();
-      final field = tester.widget<TextField>(
-        find.byKey(const ValueKey('destination-input')),
+      expect(
+        find.byKey(const ValueKey('destination-input-open')),
+        findsNothing,
       );
-      expect(field.controller!.text, '34.4, 132.4');
+      final point = tester.widget<AppleMap>(find.byType(AppleMap)).selection!;
+      expect(point.latitude, 34.4);
+      expect(point.longitude, 132.4);
       expect(writes, isEmpty);
     },
   );
