@@ -121,6 +121,7 @@ void main() {
           calls.add('${r.method} ${r.url.path}');
           if (r.url.path == '/openapi.json') return json(syncedOpenApi());
           if (r.url.path.endsWith('/resolve')) {
+            expect(jsonDecode(r.body)['purpose'], 'favorite_preview');
             return json({'destination_id': 'code-ref'});
           }
           return json({
@@ -191,6 +192,49 @@ void main() {
     },
   );
 
+  for (final mode in [
+    'multiple',
+    'preview-confirmation',
+    'query-confirmation',
+  ]) {
+    test(
+      'favorite preview rejects $mode despite flattened valid coordinate',
+      () async {
+        final writes = <String>[];
+        final api = BackendApi(
+          baseUrl: 'https://backend.example.test',
+          client: MockClient((r) async {
+            if (r.method == 'POST') writes.add(r.url.path);
+            if (r.url.path == '/openapi.json') return json(syncedOpenApi());
+            if (r.url.path.endsWith('/resolve')) {
+              expect(jsonDecode(r.body)['purpose'], 'favorite_preview');
+              return json({
+                'destination_id': 'code-ref',
+                ...candidate(),
+                'needs_confirmation': mode == 'preview-confirmation',
+                'candidates': [
+                  candidate(),
+                  if (mode == 'multiple') candidate(),
+                ],
+              });
+            }
+            return json({
+              'status': 'resolved',
+              'needs_confirmation': mode == 'query-confirmation',
+              'candidates': [candidate()],
+            });
+          }),
+        )..token = 'fixture';
+        addTearDown(api.close);
+        await expectLater(
+          FavoritesApi(api).resolvePlusCode('849VCWC8+R9'),
+          throwsA(isA<ApiFailure>()),
+        );
+        expect(writes, ['/api/v1/destinations/resolve']);
+      },
+    );
+  }
+
   for (final mode in ['full', 'short-cancel', 'short-save']) {
     testWidgets(
       'Plus Code editor $mode keeps optional address and requires short-position approval',
@@ -212,6 +256,7 @@ void main() {
             if (r.url.path == '/openapi.json') return json(spec);
             if (r.url.path.endsWith('/resolve')) {
               resolutions.add(jsonDecode(r.body) as Map);
+              expectSync(resolutions.last['purpose'], 'favorite_preview');
               return json({
                 'destination_id': 'code-ref',
                 'needs_confirmation': mode != 'full',

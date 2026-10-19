@@ -234,7 +234,11 @@ void main() {
         }),
       )..token = 'fake';
       await expectLater(
-        api.resolveDestination('34,132', 'r1'),
+        api.resolveDestination(
+          '34,132',
+          'r1',
+          purpose: DestinationPurpose.navigation,
+        ),
         throwsA(isA<ApiFailure>()),
       );
       expect(posts, 0);
@@ -267,8 +271,13 @@ void main() {
             )
             ..token = 'fake'
             ..deviceId = 'custom-car';
-      await api.resolveDestination('34,132', 'r1');
+      await api.resolveDestination(
+        '34,132',
+        'r1',
+        purpose: DestinationPurpose.navigation,
+      );
       expect(writes.length, 1);
+      expect(jsonDecode(writes.first.body)['purpose'], 'navigation');
       expect(writes.first.url.path, '/api/v1/destinations/resolve');
       await api.dispatchDestination('d1', 'c2', 'k1');
       expect(writes.last.url.path, '/destinations/d1/confirm');

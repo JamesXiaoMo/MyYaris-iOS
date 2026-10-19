@@ -256,7 +256,12 @@ class _NavigationPageState extends State<NavigationPage> {
             .whereType<Map>()
             .where((c) => _samePoint(c, point))
             .toList();
-        if (candidates.length == 1 &&
+        if (resolved?['needs_confirmation'] != true &&
+            resolved?['status'] != 'needs_clarification' &&
+            query?['needs_confirmation'] != true &&
+            query?['status'] != 'needs_clarification' &&
+            ((query?['candidates'] as List?) ?? []).length == 1 &&
+            candidates.length == 1 &&
             candidates.single['candidate_id'] is String &&
             query?['task_id'] == null) {
           await _sendPointCandidate(
@@ -343,6 +348,7 @@ class _NavigationPageState extends State<NavigationPage> {
       final r = await widget.session.api.resolveDestination(
         input.text.trim(),
         resolveKey!,
+        purpose: DestinationPurpose.navigation,
       );
       if (!mounted ||
           token != widget.session.api.token ||

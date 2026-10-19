@@ -10,7 +10,14 @@ import 'widget_test.dart' show FixtureSession;
 import 'sync_contract_test.dart' show syncedOpenApi;
 
 void main() {
-  for (final outcome in ['send', 'mismatch', 'account-change']) {
+  for (final outcome in [
+    'send',
+    'mismatch',
+    'account-change',
+    'multiple',
+    'confirmation',
+    'legacy-confirmation',
+  ]) {
     testWidgets(
       'map point immediate confirmation: $outcome; never sends before confirm',
       (tester) async {
@@ -20,6 +27,24 @@ void main() {
           baseUrl: 'https://backend.example.test',
           client: MockClient((r) async {
             if (r.method == 'POST') writes.add(r.url.path);
+            if (r.url.path.endsWith('/resolve')) {
+              expectSync(jsonDecode(r.body)['purpose'], 'navigation');
+            }
+            final candidates = [
+              {
+                'candidate_id': 'point-candidate',
+                'title': '选点',
+                'latitude': outcome == 'mismatch' ? 35.0 : 34.4,
+                'longitude': 132.4,
+              },
+              if (outcome == 'multiple')
+                {
+                  'candidate_id': 'other',
+                  'title': '其他',
+                  'latitude': 35.0,
+                  'longitude': 132.4,
+                },
+            ];
             final value = switch (r.url.path) {
               '/openapi.json' => syncedOpenApi(),
               '/api/v1/destinations/resolve' => {
@@ -27,6 +52,13 @@ void main() {
                 'name': '选点',
                 'latitude': 34.4,
                 'longitude': 132.4,
+                'needs_confirmation': [
+                  'multiple',
+                  'confirmation',
+                  'legacy-confirmation',
+                ].contains(outcome),
+                if (['multiple', 'confirmation'].contains(outcome))
+                  'candidates': candidates,
               },
               '/destinations/point-request' => {
                 'status': 'resolved',
@@ -89,10 +121,12 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('map-point-send')));
         await tester.pumpAndSettle();
         if (outcome == 'send') {
-          expect(writes, [
-            '/api/v1/destinations/resolve',
-            '/api/v1/tasks/destination',
-          ]);
+          expect(
+            writes,
+            ['/api/v1/destinations/resolve', '/api/v1/tasks/destination'],
+            reason:
+                '${(tester.state(find.byType(NavigationPage)) as dynamic).error}',
+          );
           expect(
             jsonDecode(dispatchedBodies.single)['target_device_id'],
             'car_p3pro',
@@ -108,7 +142,7 @@ void main() {
                 '${(tester.state(find.byType(NavigationPage)) as dynamic).error} / ${s.lastMessage}',
           );
           expect(s.homeDestinationTitle, '测试地点');
-        } else if (outcome == 'mismatch') {
+        } else if (outcome != 'account-change') {
           expect(writes, ['/api/v1/destinations/resolve']);
           expect(s.lastTask, isEmpty);
           expect(find.textContaining('解析结果与确认的选点不一致'), findsOneWidget);

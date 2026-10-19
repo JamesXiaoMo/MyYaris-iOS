@@ -215,6 +215,7 @@ class FavoritesApi {
     final result = await transport.resolveDestination(
       code,
       requestId(),
+      purpose: DestinationPurpose.favoritePreview,
       reference: short ? reference : null,
     );
     if (!current) throw ApiFailure('账号或服务已切换，已丢弃解析结果');
@@ -224,8 +225,15 @@ class FavoritesApi {
     if (query['task_id'] != null) throw ApiFailure('收藏解析意外关联导航任务，已阻止保存并停止后续操作');
     if (!short &&
         (result['needs_confirmation'] == true ||
+            query['needs_confirmation'] == true ||
+            result['status'] == 'needs_clarification' ||
             query['status'] == 'needs_clarification')) {
       throw ApiFailure('解析需要更多位置确认，未保存收藏');
+    }
+    // Never treat the flattened first coordinate as a unique result.
+    final previewCandidates = result['candidates'];
+    if (previewCandidates is List && previewCandidates.length != 1) {
+      throw ApiFailure('Plus Code未得到唯一有效坐标，未保存收藏');
     }
     final candidates = query['candidates'];
     if (candidates is! List ||

@@ -20,6 +20,14 @@ void verifyLog(String event) {
 String requestId() =>
     '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
 
+enum DestinationPurpose {
+  favoritePreview('favorite_preview'),
+  navigation('navigation');
+
+  const DestinationPurpose(this.value);
+  final String value;
+}
+
 abstract class CredentialStore {
   Future<String?> load();
   Future<void> save(String value);
@@ -210,6 +218,7 @@ class BackendApi {
   Future<Map<String, dynamic>> resolveDestination(
     String input,
     String key, {
+    required DestinationPurpose purpose,
     Map<String, double>? reference,
   }) async {
     await ensureResolveOnlyContract();
@@ -218,6 +227,7 @@ class BackendApi {
       '/api/v1/destinations/resolve',
       body: {
         'raw_input': input,
+        'purpose': purpose.value,
         'source': 'ios_share',
         if (reference != null)
           'reference_coordinate': {...reference, 'coord_system': 'wgs84'},
