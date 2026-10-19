@@ -76,20 +76,15 @@ class NeteaseAccountView extends ChangeNotifier {
     if (!loaded) return busy ? '正在读取网易云账号' : '网易云账号状态未知';
     if (profile['logged_in'] != true) return '网易云未登录';
     if (!manager) return '网易云已连接';
-    return profile['user_id'] == null
-        ? '${profile['nickname'] ?? '网易云账号'}'
-        : '网易云 ID：${profile['user_id']}';
+    final nickname = (profile['nickname'] as String?)?.trim() ?? '';
+    return nickname.isEmpty ? '网易云账号' : nickname;
   }
 
-  String get membership {
-    if (!loaded || profile['logged_in'] != true) return '会员信息：未知';
+  String get userIdLine {
+    if (!loaded || profile['logged_in'] != true) return 'UID：未提供';
     if (!manager) return '账号资料仅管理员可见';
-    final type = profile['vip_type'];
-    return '${type == null
-        ? '会员类型：未知'
-        : type == 0
-        ? '普通账号'
-        : '会员类型：$type'} · 剩余天数：未提供';
+    final id = profile['user_id'];
+    return id == null ? 'UID：未提供' : 'UID：$id';
   }
 
   @override

@@ -17,7 +17,7 @@ http.Response response(Object value, [int code = 200]) => http.Response(
 );
 void main() {
   test(
-    'NetEase profile scoped to admin, no invented membership days; HTTP error is not logged out',
+    'NetEase nickname and UID are separate, scoped to admin; HTTP error is not logged out',
     () async {
       var status = 200;
       final api = BackendApi(
@@ -38,8 +38,8 @@ void main() {
       addTearDown(model.dispose);
       addTearDown(session.dispose);
       await model.refresh();
-      expect(model.headline, '网易云 ID：123');
-      expect(model.membership, contains('剩余天数：未提供'));
+      expect(model.headline, 'fixture');
+      expect(model.userIdLine, 'UID：123');
       expect(model.profile.containsKey('cookie'), false);
       session.userProfile = {'role': 'user'};
       model.accountChanged();
@@ -47,6 +47,7 @@ void main() {
       expect(model.profile, {'logged_in': true});
       expect(model.manager, false);
       expect(model.headline, '网易云已连接');
+      expect(model.userIdLine, '账号资料仅管理员可见');
       status = 503;
       await model.refresh();
       expect(model.loaded, false);
@@ -105,6 +106,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('搜索曲库，选择歌曲发送到车机播放。'), findsNothing);
       expect(find.byType(PlaybackPanel), findsNothing);
+      final record = tester.widget<VinylRecord>(
+        find.byKey(const ValueKey('music-record-open')),
+      );
+      final cover = tester.widget<MusicArtwork>(
+        find.byKey(const ValueKey('vinyl-cover')),
+      );
+      expect(cover.size, record.size * .64);
       expect(find.byKey(const ValueKey('music-input')), findsNothing);
       expect(find.byKey(const ValueKey('liked-music-entry')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('music-search-open')));

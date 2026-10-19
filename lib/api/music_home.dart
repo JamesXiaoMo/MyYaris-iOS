@@ -188,6 +188,8 @@ class _MusicPageState extends State<MusicPage> {
                             children: [
                               Text(
                                 account.headline,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 key: const ValueKey('netease-account-title'),
                                 style: const TextStyle(
                                   fontSize: 17,
@@ -196,7 +198,8 @@ class _MusicPageState extends State<MusicPage> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                account.membership,
+                                account.userIdLine,
+                                key: const ValueKey('netease-account-uid'),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: Colors.white54,
@@ -403,7 +406,8 @@ class _VinylRecordState extends State<VinylRecord>
                   child: ClipOval(
                     child: MusicArtwork(
                       url: widget.session.currentTrack['cover_url'],
-                      size: widget.size * .42,
+                      key: const ValueKey('vinyl-cover'),
+                      size: widget.size * .64,
                     ),
                   ),
                 ),
