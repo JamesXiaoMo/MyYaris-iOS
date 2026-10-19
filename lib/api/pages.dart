@@ -1209,25 +1209,113 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final base = TextEditingController(text: widget.session.api.baseUrl),
-      device = TextEditingController(text: widget.session.api.deviceId);
-  bool busy = false;
-  bool editing = false;
-  String message = '';
-  @override
-  void didUpdateWidget(covariant SettingsPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!editing) {
-      base.text = widget.session.api.baseUrl;
-      device.text = widget.session.api.deviceId;
+  Future<void> accountMenu() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        key: const ValueKey('settings-account-menu'),
+        title: const Text('账号'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, 'nickname'),
+              child: const Text('修改昵称'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, 'refresh'),
+              child: const Text('刷新个人资料/权限'),
+            ),
+            TextButton(
+              onPressed: widget.session.authBusy
+                  ? null
+                  : () => Navigator.pop(dialog, 'logout'),
+              child: const Text('退出 MyYaris 登录'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'nickname') {
+      await editNickname();
+    } else if (action == 'refresh') {
+      try {
+        await widget.session.refreshUserProfile(resetDeviceDenied: true);
+        widget.session.start();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
+        }
+      }
+    } else if (action == 'logout') {
+      if (await confirmAction(context, '退出登录', '注销本机会话，保留服务域名、旧配置和服务器收藏。')) {
+        await widget.session.logout();
+      }
     }
   }
 
-  @override
-  void dispose() {
-    base.dispose();
-    device.dispose();
-    super.dispose();
+  Future<void> editNickname() async {
+    var nickname = '${widget.session.userProfile['nickname'] ?? ''}';
+    var saving = false;
+    String? failure;
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (dialog, update) => AlertDialog(
+          title: const Text('修改昵称'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                initialValue: nickname,
+                maxLength: 64,
+                enabled: !saving,
+                onChanged: (value) => nickname = value,
+              ),
+              if (failure != null) Text(failure!),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialog),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      update(() {
+                        saving = true;
+                        failure = null;
+                      });
+                      try {
+                        await widget.session.updateNickname(nickname);
+                        if (dialog.mounted) Navigator.pop(dialog);
+                      } catch (e) {
+                        if (dialog.mounted) {
+                          update(() {
+                            failure = e.toString();
+                            saving = false;
+                          });
+                        }
+                      }
+                    },
+              child: Text(saving ? '保存中…' : '保存'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -1239,137 +1327,38 @@ class _SettingsPageState extends State<SettingsPage> {
       22 + MediaQuery.paddingOf(context).bottom,
     ),
     children: [
-      heading('设置', '登录会话保存在本机 Keychain，密码不持久化。'),
+      heading('设置', ''),
       card([
-        Row(
-          children: [
-            accountAvatar(
-              widget.session.userProfile,
-              widget.session.api.baseUrl,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${widget.session.userProfile['nickname'] ?? widget.session.userProfile['username'] ?? '已登录用户'}',
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                  Text('用户名：${widget.session.userProfile['username'] ?? ''}'),
-                  Text(
-                    widget.session.canControlVehicle
-                        ? '车机权限已获授权'
-                        : '当前账号未授权车机，请联系管理员',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        TextButton(
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (context) {
-              final name = TextEditingController(
-                text: '${widget.session.userProfile['nickname'] ?? ''}',
-              );
-              return AlertDialog(
-                title: const Text('修改昵称'),
-                content: TextField(controller: name, maxLength: 64),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('取消'),
-                  ),
-                  FilledButton(
-                    onPressed: () async {
-                      try {
-                        await widget.session.updateNickname(name.text);
-                        if (context.mounted) Navigator.pop(context);
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text(e.toString())));
-                        }
-                      }
-                    },
-                    child: const Text('保存'),
-                  ),
-                ],
-              );
-            },
+        ListTile(
+          key: const ValueKey('settings-user-open'),
+          contentPadding: EdgeInsets.zero,
+          leading: accountAvatar(
+            widget.session.userProfile,
+            widget.session.api.baseUrl,
           ),
-          child: const Text('修改昵称'),
-        ),
-        TextButton(
-          onPressed: () async {
-            try {
-              await widget.session.refreshUserProfile(resetDeviceDenied: true);
-              widget.session.start();
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text(e.toString())));
-              }
-            }
-          },
-          child: const Text('刷新个人资料/权限'),
-        ),
-        TextButton(
-          onPressed: widget.session.authBusy
-              ? null
-              : () async {
-                  if (await confirmAction(
-                    context,
-                    '退出登录',
-                    '注销本机会话，保留服务域名、旧配置和服务器收藏。',
-                  )) {
-                    await widget.session.logout();
-                  }
-                },
-          child: const Text('退出 MyYaris 登录'),
+          title: Text(
+            '${widget.session.userProfile['nickname'] ?? widget.session.userProfile['username'] ?? '已登录用户'}',
+            style: const TextStyle(fontSize: 20),
+          ),
+          subtitle: Text(
+            '用户名：${widget.session.userProfile['username'] ?? ''}\n${widget.session.canControlVehicle ? '车机权限已获授权' : '当前账号未授权车机，请联系管理员'}',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: accountMenu,
         ),
       ]),
       card([
-        TextField(
-          controller: base,
-          onChanged: (_) => editing = true,
-          decoration: const InputDecoration(labelText: 'HTTPS 后端地址'),
-          autocorrect: false,
+        ListTile(
+          key: const ValueKey('settings-connection-open'),
+          title: const Text('连接设置'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push<void>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ConnectionSettingsPage(session: widget.session),
+            ),
+          ),
         ),
-        TextField(
-          controller: device,
-          onChanged: (_) => editing = true,
-          decoration: const InputDecoration(labelText: '车机设备 ID'),
-          autocorrect: false,
-        ),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: busy
-              ? null
-              : () async {
-                  setState(() => busy = true);
-                  try {
-                    await widget.session.saveConnection(base.text, device.text);
-                    if (mounted) setState(() => message = '连接设置已保存');
-                  } catch (e) {
-                    if (mounted) setState(() => message = e.toString());
-                  } finally {
-                    if (mounted) setState(() => busy = false);
-                  }
-                },
-          child: const Text('保存并连接'),
-        ),
-        if (message.isNotEmpty) Text(message),
-        const Text(
-          '服务域名变更前请退出账号。旧固定凭据已保留，但不用于正常用户登录。',
-          style: TextStyle(color: _muted, fontSize: 12),
-        ),
-      ]),
-      card([
         ListTile(
           title: const Text('网易云账号'),
           subtitle: const Text('扫码 / Cookie 导入 / 保活 / 退出'),
@@ -1400,12 +1389,82 @@ class _SettingsPageState extends State<SettingsPage> {
           style: const TextStyle(color: _muted),
         ),
       ),
-      const SizedBox(height: 20),
-      const Text(
-        'App 不伪造车机 ACK，不调用车机专用拉取 / 上报接口。进入后台会停止连接，回前台重新同步。',
-        style: TextStyle(color: _muted),
-      ),
     ],
+  );
+}
+
+class ConnectionSettingsPage extends StatefulWidget {
+  const ConnectionSettingsPage({super.key, required this.session});
+  final BackendSession session;
+  @override
+  State<ConnectionSettingsPage> createState() => _ConnectionSettingsPageState();
+}
+
+class _ConnectionSettingsPageState extends State<ConnectionSettingsPage> {
+  late final base = TextEditingController(text: widget.session.api.baseUrl),
+      device = TextEditingController(text: widget.session.api.deviceId);
+  bool busy = false;
+  bool editing = false;
+  String message = '';
+  @override
+  void didUpdateWidget(covariant ConnectionSettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!editing) {
+      base.text = widget.session.api.baseUrl;
+      device.text = widget.session.api.deviceId;
+    }
+  }
+
+  @override
+  void dispose() {
+    base.dispose();
+    device.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('连接设置')),
+    body: ListView(
+      padding: const EdgeInsets.all(22),
+      children: [
+        card([
+          TextField(
+            controller: base,
+            onChanged: (_) => editing = true,
+            decoration: const InputDecoration(labelText: 'HTTPS 后端地址'),
+            autocorrect: false,
+          ),
+          TextField(
+            controller: device,
+            onChanged: (_) => editing = true,
+            decoration: const InputDecoration(labelText: '车机设备 ID'),
+            autocorrect: false,
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: busy
+                ? null
+                : () async {
+                    setState(() => busy = true);
+                    try {
+                      await widget.session.saveConnection(
+                        base.text,
+                        device.text,
+                      );
+                      if (mounted) setState(() => message = '连接设置已保存');
+                    } catch (e) {
+                      if (mounted) setState(() => message = e.toString());
+                    } finally {
+                      if (mounted) setState(() => busy = false);
+                    }
+                  },
+            child: const Text('保存并连接'),
+          ),
+          if (message.isNotEmpty) Text(message),
+        ]),
+      ],
+    ),
   );
 }
 
