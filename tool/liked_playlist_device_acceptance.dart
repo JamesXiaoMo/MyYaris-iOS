@@ -86,28 +86,13 @@ Future<void> main() async {
     proof['first_page_count'] = model.tracks.length;
     proof['total'] = model.total;
     proof['first_has_more'] = model.hasMore;
-    proof['first_next_offset'] = model.nextOffset;
+    proof['revision_present'] = model.revision != null;
+    proof['served_from_cache'] = model.fromCache;
     proof['schema_validated'] = model.loaded;
     await photo('liked-playlist-device.png');
-    if (model.hasMore) {
-      final scroll = state.scroll as ScrollController;
-      await scroll.animateTo(
-        scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 700),
-        curve: Curves.easeInOut,
-      );
-      await until(
-        () => !model.busy && (model.nextOffset > 30 || model.error != null),
-      );
-      if (model.error != null) throw StateError(model.error!);
-      proof['second_page_count'] = model.tracks.length;
-      proof['second_next_offset'] = model.nextOffset;
-      proof['second_has_more'] = model.hasMore;
-      proof['no_duplicate_song_ids'] =
-          model.tracks.map((t) => t['song_id']).toSet().length ==
-          model.tracks.length;
-      await photo('liked-playlist-more-device.png');
-    }
+    proof['no_duplicate_song_ids'] =
+        model.tracks.map((t) => t['song_id']).toSet().length ==
+        model.tracks.length;
     final refresh =
         tree()
                 .firstWhere(

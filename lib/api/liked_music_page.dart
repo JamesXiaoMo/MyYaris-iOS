@@ -1,28 +1,25 @@
 import 'package:flutter/material.dart';
 import 'backend.dart';
 import 'liked_music.dart';
+import 'liked_music_store.dart';
 
 class LikedMusicPage extends StatefulWidget {
-  const LikedMusicPage({super.key, required this.session});
+  const LikedMusicPage({super.key, required this.session, this.store});
   final BackendSession session;
+  final LikedMusicStore? store;
   @override
   State<LikedMusicPage> createState() => _LikedMusicPageState();
 }
 
 class _LikedMusicPageState extends State<LikedMusicPage> {
-  late final model = LikedMusicController(widget.session);
+  late final model = LikedMusicController(widget.session, store: widget.store);
   final scroll = ScrollController();
   bool selecting = false;
   @override
   void initState() {
     super.initState();
     model.addListener(_refreshUI);
-    scroll.addListener(() {
-      if (scroll.position.extentAfter < 180 && model.error == null) {
-        model.load();
-      }
-    });
-    model.load(refresh: true);
+    model.open();
   }
 
   void _refreshUI() {
@@ -102,7 +99,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
         IconButton(
           key: const ValueKey('liked-refresh'),
           tooltip: '刷新歌单',
-          onPressed: model.busy ? null : () => model.load(refresh: true),
+          onPressed: model.busy ? null : model.refresh,
           icon: const Icon(Icons.refresh),
         ),
       ],
@@ -112,7 +109,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
       child: AnimatedBuilder(
         animation: Listenable.merge([model, widget.session]),
         builder: (context, _) => RefreshIndicator(
-          onRefresh: () => model.load(refresh: true),
+          onRefresh: model.refresh,
           child: ListView.builder(
             key: const ValueKey('liked-list'),
             controller: scroll,
@@ -132,7 +129,19 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                       const SizedBox(height: 8),
                       const Text('列出曲目不等于可完整播放；仅点击选歌后检查资源首段，VIP/地区限制可能仅可试听。'),
                       if (model.loaded)
-                        Text('已加载 ${model.tracks.length} / ${model.total} 首'),
+                        Text(
+                          model.statusLine,
+                          key: const ValueKey('liked-status'),
+                        ),
+                      if (model.syncError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            model.syncError!,
+                            key: const ValueKey('liked-sync-error'),
+                            style: const TextStyle(color: Colors.orangeAccent),
+                          ),
+                        ),
                     ],
                   ),
                 );
@@ -140,7 +149,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
               if (index == model.tracks.length + 1) {
                 return Column(
                   children: [
-                    if (model.busy)
+                    if (model.loadingFirst || (model.syncing && model.hasMore))
                       const Padding(
                         padding: EdgeInsets.all(20),
                         child: CircularProgressIndicator(),
@@ -153,19 +162,19 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                       ),
                       if (model.allowed)
                         TextButton(
-                          onPressed: model.busy
-                              ? null
-                              : () => model.load(refresh: !model.loaded),
+                          onPressed: model.busy ? null : model.refresh,
                           child: const Text('重试'),
                         ),
-                    ] else if (model.loaded && model.tracks.isEmpty)
-                      const Text('歌单读取成功，暂无喜欢的音乐')
-                    else if (model.hasMore && !model.busy)
+                    ] else if (model.syncError != null && !model.busy)
                       TextButton(
-                        key: const ValueKey('liked-more'),
-                        onPressed: () => model.load(),
-                        child: const Text('加载更多（30首）'),
+                        key: const ValueKey('liked-sync-retry'),
+                        onPressed: model.refresh,
+                        child: const Text('重新检查更新'),
                       )
+                    else if (model.loaded &&
+                        model.tracks.isEmpty &&
+                        !model.fromCache)
+                      const Text('歌单读取成功，暂无喜欢的音乐')
                     else if (model.loaded && !model.busy)
                       const Text('已到歌单末尾'),
                   ],

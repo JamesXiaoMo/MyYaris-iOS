@@ -1,4 +1,5 @@
 import 'contracts.dart';
+import 'liked_music_store.dart';
 import 'music_queue_contract.dart';
 import 'user_auth.dart';
 import 'dart:async';
@@ -61,6 +62,7 @@ const queueErrorMessages = <String, String>{
   'QUEUE_SOURCE_MISMATCH': '指定快照不是喜欢歌单，未退为单曲',
   'QUEUE_INDEX_MISMATCH': '曲目与快照索引不一致，请刷新后重选',
   'QUEUE_VERSION_CONFLICT': '队列版本已变化，请从第一页刷新，未混合分页',
+  'FAVORITE_REVISION_CONFLICT': '喜欢歌单版本已更新，正在重新同步，未混合分页',
   'QUEUE_PRECONDITION_FAILED': '车机队列已变化，请刷新后重新确认操作',
   'EMPTY_PLAYLIST': '我喜欢的音乐为空',
   'QUEUE_NOT_READY': '队列尚未就绪，请稍后重试',
@@ -775,6 +777,8 @@ class BackendSession extends ChangeNotifier {
   }
 
   void resetAccountCaches() {
+    // Private favorite metadata never outlives logout, session loss or an origin switch.
+    unawaited(LikedMusicStore.shared.purgeAll());
     commandPending = false;
     preparingTrack = false;
     deviceDenied = false;
