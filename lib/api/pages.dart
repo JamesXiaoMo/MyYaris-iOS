@@ -1276,7 +1276,6 @@ class TrackPage extends StatefulWidget {
 
 class _TrackPageState extends State<TrackPage> {
   String quality = 'standard';
-  List<Map<String, dynamic>> recommendations = [];
   @override
   Widget build(BuildContext context) {
     final online = widget.track['id'] != null;
@@ -1353,16 +1352,10 @@ class _TrackPageState extends State<TrackPage> {
             TextButton(
               onPressed: () async {
                 try {
-                  final r = await widget.session.api.call(
-                    'POST',
-                    '/api/v1/music/netease/intelligence',
-                    body: {'seed_song_id': widget.track['id'], 'count': 30},
-                  );
-                  if (mounted) {
-                    setState(
-                      () => recommendations = ((r['songs'] as List?) ?? [])
-                          .map((x) => Map<String, dynamic>.from(x as Map))
-                          .toList(),
+                  await widget.session.choosePlaybackMode('intelligence');
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('心动模式已请求，等待车机实际应用')),
                     );
                   }
                 } catch (e) {
@@ -1373,15 +1366,7 @@ class _TrackPageState extends State<TrackPage> {
                   }
                 }
               },
-              child: const Text('获取心动推荐队列'),
-            ),
-            ...recommendations.map(
-              (t) => ListTile(
-                title: Text('${t['title']}'),
-                subtitle: Text('${t['artist'] ?? ''}'),
-                trailing: const Icon(Icons.play_arrow),
-                onTap: () => widget.onPlay(t),
-              ),
+              child: const Text('使用网易云心动模式'),
             ),
           ],
         ],

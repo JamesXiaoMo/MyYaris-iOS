@@ -91,4 +91,14 @@ void main() {
       );
     }
   });
+  test('authentic open-ended intelligence batch can be fully loaded without claiming future recommendations complete', () {
+    final queue = MusicQueueAccumulator();
+    for (final args in [[0, 50], [50, 15]]) {
+      queue.add(MusicQueuePage.fromJson({...fixture(args[0], args[1], established: false),
+        'source': 'netease_intelligence', 'queue_state': 'ready'}));
+    }
+    expect(queue.complete, true);
+    expect(queue.tracks.length, 65);
+  });
+
 }

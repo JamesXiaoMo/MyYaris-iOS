@@ -49,7 +49,8 @@ Future<void> showQueueModes(
                 padding: EdgeInsets.all(12),
                 child: Text('车机尚未确认新版队列能力，未伪报模式已应用'),
               ),
-            for (final item in playbackModeLabels.entries)
+            for (final item in playbackModeLabels.entries.where((item) =>
+                item.key != 'single_loop' || session.appliedQueueMode == 'single_loop'))
               ListTile(
                 key: ValueKey('queue-mode-${item.key}'),
                 enabled:

@@ -477,6 +477,8 @@ void main() {
       expect(find.textContaining('已应用：'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('queue-mode-menu')));
       await tester.pumpAndSettle();
+      expect(find.byType(ListTile), findsNWidgets(3));
+      expect(find.byKey(const ValueKey('queue-mode-single_loop')), findsNothing);
       final tile = tester.widget<ListTile>(
         find.byKey(const ValueKey('queue-mode-intelligence')),
       );

@@ -22,7 +22,7 @@ class MusicQueuePage {
   final String id, source;
   final int version, total, offset, limit;
   final bool established, hasMore;
-  bool get ready => established;
+  bool get ready => established || source == 'netease_intelligence';
   final List<Map<String, dynamic>> tracks;
 
   factory MusicQueuePage.fromJson(Map<String, dynamic> data, {Uri? origin}) {
@@ -55,6 +55,9 @@ class MusicQueuePage {
         more != (offset + rows.length < total) ||
         (more && rows.isEmpty)) {
       throw ApiFailure('队列分页或版本格式不符，未启用新播放模式');
+    }
+    if (source == 'netease_intelligence' && data['queue_state'] != 'ready') {
+      throw ApiFailure('心动批次尚未就绪');
     }
     final tracks = <Map<String, dynamic>>[], seen = <String>{};
     for (var i = 0; i < rows.length; i++) {
@@ -126,7 +129,7 @@ class MusicQueueAccumulator {
   List<Map<String, dynamic>> get tracks => List.unmodifiable(_tracks);
   bool get complete =>
       _first != null &&
-      _first!.established &&
+      _first!.ready &&
       !_hasMore &&
       _tracks.length == _first!.total;
   void add(MusicQueuePage page) {
