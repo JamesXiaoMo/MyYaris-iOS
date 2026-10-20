@@ -98,7 +98,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 20),
           child: Text(
-            '保存到后端 · WGS84 纬度在前、经度在后\n选择收藏只填入目的地，发送仍需确认',
+            '保存后仅填入目的地，发送到车机前仍需确认',
             style: TextStyle(color: Colors.white54),
           ),
         ),
@@ -506,7 +506,7 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
         FilledButton(
           key: const ValueKey('favorite-save'),
           onPressed: busy || uncertain ? null : save,
-          child: Text(busy ? '保存中…' : '保存到后端'),
+          child: Text(busy ? '保存中…' : '保存'),
         ),
       ],
     ),

@@ -61,7 +61,7 @@ class MusicContract {
             (input['expected_queue_version'] != null &&
                 (input['expected_queue_version'] is! int ||
                     input['expected_queue_version'] < 0))) {
-          throw ApiFailure('队列前置条件无效');
+          throw ApiFailure('播放列表信息无效，请刷新后重试');
         }
         if (source == 'netease_favorite' &&
             (input['queue_id'] is! String ||
@@ -71,7 +71,7 @@ class MusicContract {
                 (input['queue_index'] != null &&
                     (input['queue_index'] is! int ||
                         input['queue_index'] < 0)))) {
-          throw ApiFailure('喜欢快照标识或索引无效');
+          throw ApiFailure('喜欢歌单信息异常，请刷新后重试');
         }
         return {
           'track_id': id,
@@ -118,7 +118,7 @@ class MusicContract {
         }
         if (action == 'switch_queue' &&
             !{'netease_favorite', 'single_track'}.contains(input['source'])) {
-          throw ApiFailure('未知队列来源');
+          throw ApiFailure('播放列表来源异常，请刷新后重试');
         }
         final result = <String, dynamic>{
           if (action == 'set_playback_mode')
@@ -129,7 +129,7 @@ class MusicContract {
         for (final key in ['expected_queue_id', 'start_track_id']) {
           if (input[key] != null) {
             if (input[key] is! String || (input[key] as String).isEmpty) {
-              throw ApiFailure('队列参数无效');
+              throw ApiFailure('播放列表参数异常，请刷新后重试');
             }
             result[key] = input[key];
           }
@@ -145,7 +145,7 @@ class MusicContract {
                 input[key] < 0 ||
                 ((key == 'song_id' || key == 'seed_song_id') &&
                     input[key] == 0)) {
-              throw ApiFailure('队列数字参数无效');
+              throw ApiFailure('播放列表参数异常，请刷新后重试');
             }
             result[key] = input[key];
           }

@@ -240,7 +240,7 @@ class LikedMusicController extends ChangeNotifier {
   Future<void> _run(bool force) async {
     if (_disposed) return;
     if (!allowed) {
-      error = '仅服务器 Owner 的 MyYaris 管理员可查看此私人喜欢歌单';
+      error = '只有管理员可以查看这份喜欢歌单';
       notifyListeners();
       return;
     }
@@ -303,7 +303,7 @@ class LikedMusicController extends ChangeNotifier {
         );
       }
       if (pulled.stale) {
-        syncError = '后端暂时连不上网易云，当前显示服务器上次校验的歌单；可稍后点击刷新';
+        syncError = '暂时连不上网易云，当前显示上次成功更新的歌单；可稍后刷新';
       }
     } catch (e) {
       if (!current()) return;
@@ -342,7 +342,7 @@ class LikedMusicController extends ChangeNotifier {
       final progressive = tracks.isEmpty;
       try {
         while (true) {
-          if (++pages > 200) throw ApiFailure('喜欢歌单分页异常，已停止');
+          if (++pages > 200) throw ApiFailure('歌单内容异常，请稍后重试');
           final result = await session.api.call(
             'GET',
             '/api/v1/music/netease/playlist/favorite',
@@ -358,7 +358,7 @@ class LikedMusicController extends ChangeNotifier {
             throw ApiFailure('网易云账号或喜欢歌单已变更，请刷新后重试');
           }
           if (rev != null && page.revision != null && page.revision != rev) {
-            throw ApiFailure('喜欢歌单版本在分页中变化，请刷新后重试');
+            throw ApiFailure('歌单刚刚更新，请刷新后重试');
           }
           playlist = page.playlistId;
           rev ??= page.revision;
@@ -378,7 +378,7 @@ class LikedMusicController extends ChangeNotifier {
           if (!page.hasMore) break;
         }
         if (rev != null && rows.length != total) {
-          throw ApiFailure('喜欢歌单分页不完整，未覆盖本地缓存');
+          throw ApiFailure('歌单未能完整读取，暂时保留原有内容');
         }
         return _Pulled(rows, total, playlist, rev, etag, owner, synced, stale);
       } on ApiFailure catch (e) {
@@ -417,10 +417,9 @@ class LikedMusicController extends ChangeNotifier {
   void _failed(Object e, LikedMusicScope? scope) {
     final status = e is ApiFailure ? e.statusCode : null;
     final message = switch (e) {
-      ApiFailure(statusCode: 403) => '无权限：仅服务器 Owner 的 MyYaris 管理员可查看此私人喜欢歌单',
-      ApiFailure(statusCode: 409) =>
-        '后端网易云会话未授权或已失效，请管理者在设置中登录网易云；MyYaris 登录仍保留',
-      ApiFailure(statusCode: 404) => '喜欢歌单未找到或后端接口尚未部署，请重试或联系管理者',
+      ApiFailure(statusCode: 403) => '无权限：只有管理员可以查看这份喜欢歌单',
+      ApiFailure(statusCode: 409) => '网易云登录已失效，请管理员在设置中重新登录；MyYaris 账号仍保持登录',
+      ApiFailure(statusCode: 404) => '未找到这份喜欢歌单，请重试或联系管理员',
       ApiFailure(statusCode: 502 || 503 || 504) => '网易云上游暂不可用或超时，不是空歌单；请重试',
       ApiFailure() => e.message,
       _ => '喜欢歌单加载失败，请重试',
@@ -432,7 +431,7 @@ class LikedMusicController extends ChangeNotifier {
       error = message;
     } else if (tracks.isNotEmpty) {
       syncError =
-          '更新失败（${message.split('；').first}），仍显示${_stamp(checkedAt ?? syncedAt)}的本地缓存';
+          '更新失败（${message.split('；').first}），仍显示${_stamp(checkedAt ?? syncedAt)}的缓存';
     } else {
       error = message;
     }
@@ -448,7 +447,7 @@ class LikedMusicController extends ChangeNotifier {
   String get statusLine {
     if (!loaded) return '';
     final when = checkedAt ?? syncedAt;
-    final stamp = when == null ? '' : ' · ${_stamp(when).trim()} 校验';
+    final stamp = when == null ? '' : ' · ${_stamp(when).trim()} 更新';
     return '共 $total 首$stamp${fromCache && syncing ? ' · 正在后台检查更新…' : ''}';
   }
 

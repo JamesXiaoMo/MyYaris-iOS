@@ -59,7 +59,7 @@ class UserSessionRecord {
         expires == null ||
         !expires.isAfter(DateTime.now().toUtc()) ||
         data['user'] is! Map) {
-      throw ApiFailure('登录会话响应无效，请核对后端版本');
+      throw ApiFailure('登录响应异常，请稍后重试');
     }
     return UserSessionRecord(
       secret: token,

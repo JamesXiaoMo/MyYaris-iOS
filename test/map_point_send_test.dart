@@ -145,7 +145,7 @@ void main() {
         } else if (outcome != 'account-change') {
           expect(writes, ['/api/v1/destinations/resolve']);
           expect(s.lastTask, isEmpty);
-          expect(find.textContaining('解析结果与确认的选点不一致'), findsOneWidget);
+          expect(find.textContaining('解析结果与所选地点不一致'), findsOneWidget);
         } else {
           expect(writes, isEmpty);
         }

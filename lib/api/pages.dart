@@ -25,9 +25,7 @@ Future<void> showApiResult(
       builder: (context) => AlertDialog(
         title: Text(title),
         content: SingleChildScrollView(
-          child: SelectableText(
-            const JsonEncoder.withIndent('  ').convert(redact(result)),
-          ),
+          child: SelectableText(resultSummary(result)),
         ),
         actions: [
           TextButton(
@@ -39,29 +37,80 @@ Future<void> showApiResult(
     );
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiFailure ? e.message : '操作未完成，请稍后重试')),
+      );
     }
   }
 }
 
-Object? redact(Object? value) {
-  if (value is Map) {
-    return value.map(
-      (k, v) => MapEntry(
-        '$k',
-        RegExp(
-              'cookie|token|music_u|authorization',
-              caseSensitive: false,
-            ).hasMatch('$k')
-            ? '[已隐藏]'
-            : redact(v),
-      ),
+String resultSummary(Map<String, dynamic> result) {
+  final lines = <String>[];
+  String size(num value) {
+    final bytes = value.toDouble();
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${bytes.round()} B';
+  }
+
+  void count(String key, String label) {
+    final value = result[key];
+    if (value is num) lines.add('$label：${value.round()}');
+  }
+
+  count('total_files', '缓存文件');
+  final used = result['total_bytes'];
+  final max = result['max_bytes'];
+  if (used is num) {
+    lines.add(
+      max is num && max > 0
+          ? '缓存占用：${size(used)} / ${size(max)}'
+          : '缓存占用：${size(used)}',
     );
   }
-  if (value is List) return value.map(redact).toList();
-  return value;
+  final usage = result['usage_percentage'];
+  if (usage is num) lines.add('使用率：${usage.toStringAsFixed(1)}%');
+  count('evicted_count', '已清理文件');
+  final freed = result['evicted_bytes'];
+  if (freed is num) lines.add('已释放空间：${size(freed)}');
+  final remaining = result['remaining_stats'];
+  if (remaining is Map) {
+    final files = remaining['total_files'];
+    if (files is num) lines.add('剩余缓存文件：${files.round()}');
+    final bytes = remaining['total_bytes'];
+    if (bytes is num) lines.add('剩余占用：${size(bytes)}');
+  }
+  count('scanned_count', '已扫描文件');
+  count('added_count', '新增曲目');
+  count('updated_count', '更新曲目');
+  count('total_tracks', '曲库曲目');
+  final loggedIn = result['logged_in'];
+  if (loggedIn is bool) lines.add(loggedIn ? '网易云已连接' : '网易云未连接');
+  final nickname = result['nickname'];
+  if (loggedIn == true && nickname is String && nickname.trim().isNotEmpty) {
+    lines.add('账号：${nickname.trim()}');
+  }
+  final lyric = result['lrc'] ?? result['lyric'];
+  final lyricText = lyric is String
+      ? lyric
+      : lyric is Map && lyric['lyric'] is String
+      ? lyric['lyric'] as String
+      : null;
+  if (lyricText != null) {
+    final text = lyricText.replaceAll(RegExp(r'\[[^\]]*\]'), '').trim();
+    lines.add(text.isEmpty ? '暂无歌词' : text);
+  }
+  final errorCode = '${result['error_code'] ?? ''}';
+  if (errorCode.isNotEmpty) {
+    lines.add(queueErrorMessages[errorCode] ?? '操作未完成，请稍后重试');
+  }
+  if (lines.isEmpty) lines.add('操作已完成');
+  return lines.join('\n');
 }
 
 Future<bool> confirmAction(
@@ -246,7 +295,7 @@ class _NavigationPageState extends State<NavigationPage> {
         await loadResolved();
         if (sameIdentity()) {
           messenger.showSnackBar(
-            const SnackBar(content: Text('该目的地已提交，已查询回执，未重复派发')),
+            const SnackBar(content: Text('该目的地已提交，正在查询处理结果，不会重复发送')),
           );
         }
         return;
@@ -269,19 +318,19 @@ class _NavigationPageState extends State<NavigationPage> {
             point,
           );
         } else {
-          error = '解析结果与确认的选点不一致或尚未完成，未派发。请重新选择目的地';
+          error = '解析结果与所选地点不一致，未发送到车机，请重新选择目的地';
         }
       }
       if (sameIdentity()) {
         messenger.showSnackBar(
-          SnackBar(content: Text(error ?? '目的地已提交，等待车机回执')),
+          SnackBar(content: Text(error ?? '目的地已提交，等待车机确认')),
         );
       }
     } catch (e) {
       if (sameIdentity()) {
         messenger.showSnackBar(
           SnackBar(
-            content: Text(e is ApiFailure ? e.message : '目的地处理失败，未自动重试，请核对回执'),
+            content: Text(e is ApiFailure ? e.message : '目的地处理失败，未自动重试，请稍后重试'),
           ),
         );
       }
@@ -383,7 +432,7 @@ class _NavigationPageState extends State<NavigationPage> {
       if (!await confirmAction(
         context,
         '上传音频',
-        '将 ${selected['name']} 发往你的私网后端转写和解析目的地，随后由你确认候选，不在上传时派发。是否继续？',
+        '将“${selected['name']}”发送到服务器识别目的地，识别结果需你确认后才发送到车机。是否继续？',
       )) {
         return;
       }
@@ -441,7 +490,7 @@ class _NavigationPageState extends State<NavigationPage> {
       setState(() {
         query = q;
         if (q['status'] == 'failed' || q['status'] == 'unavailable') {
-          error = '解析未完成/能力不可用，请核对真实 provider；不会派发';
+          error = '暂时无法解析这个目的地，未发送到车机，请稍后重试';
         }
       });
     }
@@ -729,7 +778,7 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
       if (mounted && who == identity) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('播放指令已提交，并不代表已经起播')));
+        ).showSnackBar(const SnackBar(content: Text('已发送播放请求，等待车机开始播放')));
       }
     } catch (e) {
       if (mounted && who == identity) {
@@ -755,18 +804,6 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
               '账号已登录，但未授权当前车机；请联系管理员绑定后再播放。',
               style: TextStyle(color: Colors.orangeAccent),
             ),
-          if (widget.session.musicDiagnostic.isNotEmpty)
-            card([
-              Text(
-                '只读诊断：${widget.session.musicDiagnostic['search']} · 搜索数量 ${widget.session.musicDiagnostic['total'] ?? '未知'}',
-              ),
-              if (widget.session.musicDiagnostic['error'] != null)
-                Text(
-                  '${widget.session.musicDiagnostic['error']}',
-                  style: const TextStyle(color: Colors.orangeAccent),
-                ),
-              const Text('未发送播放/音量/导航指令，实际起播尚未验收'),
-            ]),
           card([
             DropdownButtonFormField<String>(
               initialValue: source,
@@ -802,9 +839,9 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
             if (error != null)
-              const Text('搜索失败，未将错误当作空结果')
+              const Text('搜索失败，请检查网络或稍后重试')
             else if (searched && tracks.isEmpty)
-              const Text('搜索返回成功，暂无结果；旧后端若吞掉上游错误，需后端诊断确认')
+              const Text('没有找到相关歌曲，请更换关键词或来源')
             else if (searched)
               Text('共 $total 首', style: const TextStyle(color: _muted)),
           ]),
@@ -821,10 +858,6 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
                 '${track['artist'] ?? ''} · ${track['album'] ?? ''}',
                 style: const TextStyle(color: _muted),
               ),
-              Text(
-                '来源：${track['source']} · song_id：${track['song_id'] ?? track['id'] ?? '非在线曲目'} · 可播性待检查',
-                style: const TextStyle(color: _muted, fontSize: 12),
-              ),
               Wrap(
                 spacing: 8,
                 children: [
@@ -836,7 +869,7 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
                         ? null
                         : () => play(track),
                     icon: const Icon(Icons.play_arrow),
-                    label: Text(selecting ? '检查可播性…' : '检查并车机播放'),
+                    label: Text(selecting ? '正在发送…' : '发送到车机播放'),
                   ),
                   TextButton(
                     onPressed: () => Navigator.push(
@@ -1145,7 +1178,9 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  session.preparingTrack ? '正在检查资源可播性…' : session.commandLabel,
+                  session.preparingTrack
+                      ? '正在确认歌曲是否可播放…'
+                      : session.commandLabel,
                   style: const TextStyle(fontSize: 12, color: Colors.white60),
                 ),
               ),
@@ -1158,15 +1193,11 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         Text(
-          '${session.playbackStale ? '过期/尚未收到的快照' : '服务器转发的状态快照'}：${p['playback_state'] ?? '未知'} · ${session.realtime}',
+          '车机状态：${session.homeMusicState}',
           style: const TextStyle(color: _muted),
         ),
         Text(
-          '车机心跳：${p['last_heartbeat_at'] ?? '未知'} · 60秒内心跳才启用播控',
-          style: const TextStyle(color: _muted, fontSize: 12),
-        ),
-        Text(
-          '快照时间（后端提供）：${p['updated_at'] ?? '未知'}',
+          '车机连接：${session.heartbeatFresh ? '正常' : '等待更新'}',
           style: const TextStyle(color: _muted, fontSize: 12),
         ),
         Wrap(
@@ -1220,8 +1251,8 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             },
           ),
         ] else
-          const Text('进度：未知/不可用，等待车机有效状态'),
-        const Text('车机软件音量'),
+          const Text('进度：暂无车机进度'),
+        const Text('车机音量'),
         if (ready && volume != null)
           Slider(
             value: volumeDraft ?? volume,
@@ -1232,27 +1263,28 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             },
           )
         else
-          const Text('音量：未知/不可用，未采用默认值'),
+          const Text('音量：暂无车机音量，未采用默认值'),
         QueueModeCaption(session: session),
-        Text(
-          '目标：${session.api.deviceId} · command_id：${session.lastCommandState['command_id'] ?? '无'}',
-        ),
+        Text('车机：${session.api.deviceId}'),
         Text(session.commandLabel),
-        if (session.preparingTrack) const Text('正在检查资源与音频首段，尚未发出播放指令'),
-        if (session.lastTrackProbe.isNotEmpty)
+        if (session.preparingTrack) const Text('正在确认歌曲是否可播放，尚未发送播放指令'),
+        if (session.lastTrackProbe['status'] == 'failed')
           Text(
-            session.lastTrackProbe['status'] == 'failed'
-                ? '选歌检查失败：${session.lastTrackProbe['message']}'
-                : '首段检查：HTTP ${session.lastTrackProbe['http_status']} · ${session.lastTrackProbe['content_type']} · Range ${session.lastTrackProbe['range_supported']}（不等于完整权限或已播放）',
+            '歌曲无法播放：${session.lastTrackProbe['message'] ?? '请稍后重试'}',
+            style: const TextStyle(color: Colors.orangeAccent),
           ),
         if (session.lastCommandState['error_code'] != null)
-          Text('车机错误：${session.lastCommandState['error_code']}'),
+          Text(
+            queueErrorMessages[session.lastCommandState['error_code']] ??
+                '车机返回错误，请稍后重试',
+            style: const TextStyle(color: Colors.orangeAccent),
+          ),
         TextButton(
           onPressed: session.refreshCommandState,
-          child: const Text('查询指令执行结果'),
+          child: const Text('刷新执行结果'),
         ),
         const Text(
-          '控件以车机回报为准；HTTP / WebSocket 已送达不等于执行成功。',
+          '播放控制以车机回报为准；已送达不代表已开始播放。',
           style: TextStyle(color: _muted, fontSize: 12),
         ),
       ]);
@@ -1275,7 +1307,6 @@ class TrackPage extends StatefulWidget {
 }
 
 class _TrackPageState extends State<TrackPage> {
-  String quality = 'standard';
   @override
   Widget build(BuildContext context) {
     final online = widget.track['id'] != null;
@@ -1294,60 +1325,24 @@ class _TrackPageState extends State<TrackPage> {
             child: const Text('发送到车机播放'),
           ),
           const SizedBox(height: 12),
-          if (!online)
-            TextButton(
-              onPressed: () => showApiResult(
-                context,
-                '曲目元数据',
-                () => widget.session.api.call(
-                  'GET',
-                  '/api/v1/music/tracks/${Uri.encodeComponent('${widget.track['track_id']}')}',
-                ),
-              ),
-              child: const Text('读取曲目详情'),
-            ),
-          TextButton(
-            onPressed: () => showApiResult(
-              context,
-              '流媒体响应',
-              () => widget.session.api.probeStream(widget.track),
-            ),
-            child: const Text('检查流媒体首块（在线歌曲会触发缓存）'),
-          ),
           if (online) ...[
-            DropdownButtonFormField<String>(
-              initialValue: quality,
-              items: [
-                'standard',
-                'exhigh',
-                'lossless',
-                'hires',
-              ].map((q) => DropdownMenuItem(value: q, child: Text(q))).toList(),
-              onChanged: (v) => setState(() => quality = v!),
+            const ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.graphic_eq),
+              title: Text('音质'),
+              subtitle: Text('由车机与网易云自动选择，当前不支持单独切换'),
             ),
             TextButton(
               onPressed: () => showApiResult(
                 context,
-                '音质 / CDN 信息',
-                () => widget.session.api.call(
-                  'GET',
-                  '/api/v1/music/netease/song_url',
-                  query: {'song_id': id, 'level': quality},
-                ),
-              ),
-              child: const Text('获取音质信息（不直接播放 CDN）'),
-            ),
-            TextButton(
-              onPressed: () => showApiResult(
-                context,
-                '歌词 / 翻译',
+                '歌词',
                 () => widget.session.api.call(
                   'GET',
                   '/api/v1/music/netease/lyric',
                   query: {'song_id': id},
                 ),
               ),
-              child: const Text('歌词与翻译'),
+              child: const Text('查看歌词'),
             ),
             TextButton(
               onPressed: () async {
@@ -1355,7 +1350,7 @@ class _TrackPageState extends State<TrackPage> {
                   await widget.session.choosePlaybackMode('intelligence');
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('心动模式已请求，等待车机实际应用')),
+                      const SnackBar(content: Text('已请求心动模式，等待车机确认')),
                     );
                   }
                 } catch (e) {
@@ -1432,7 +1427,7 @@ class _SettingsPageState extends State<SettingsPage> {
         }
       }
     } else if (action == 'logout') {
-      if (await confirmAction(context, '退出登录', '注销本机会话，保留服务域名、旧配置和服务器收藏。')) {
+      if (await confirmAction(context, '退出登录', '只会退出本机登录，保留连接设置和收藏。')) {
         await widget.session.logout();
       }
     }
@@ -1535,7 +1530,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         ListTile(
           title: const Text('网易云账号'),
-          subtitle: const Text('扫码 / Cookie 导入 / 保活 / 退出'),
+          subtitle: const Text('扫码登录 / 凭据导入 / 保持登录 / 退出'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(
             context,
@@ -1546,7 +1541,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         ListTile(
           title: const Text('媒体库与缓存'),
-          subtitle: const Text('扫描索引 / 缓存用量 / LRU 清理'),
+          subtitle: const Text('扫描曲库 / 缓存用量 / 清理缓存'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(
             context,
@@ -1559,7 +1554,7 @@ class _SettingsPageState extends State<SettingsPage> {
       AnimatedBuilder(
         animation: widget.session,
         builder: (context, _) => Text(
-          '${widget.session.connection}\n${widget.session.realtime}\n${widget.session.lastMessage}',
+          '${widget.session.connection} · ${widget.session.realtime}',
           style: const TextStyle(color: _muted),
         ),
       ),
@@ -1606,13 +1601,13 @@ class _ConnectionSettingsPageState extends State<ConnectionSettingsPage> {
           TextField(
             controller: base,
             onChanged: (_) => editing = true,
-            decoration: const InputDecoration(labelText: 'HTTPS 后端地址'),
+            decoration: const InputDecoration(labelText: '服务器地址（HTTPS）'),
             autocorrect: false,
           ),
           TextField(
             controller: device,
             onChanged: (_) => editing = true,
-            decoration: const InputDecoration(labelText: '车机设备 ID'),
+            decoration: const InputDecoration(labelText: '车机标识'),
             autocorrect: false,
           ),
           const SizedBox(height: 16),
@@ -1782,7 +1777,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
           if (qrImage != null) QrImage(data: qrImage!),
           Text(message),
           const Text(
-            '使用另一设备的网易云 App 扫码并确认；Cookie 由后端保存。',
+            '使用另一设备的网易云 App 扫码并确认；登录凭据只保存在服务器。',
             style: TextStyle(color: _muted),
           ),
         ]),
@@ -1792,9 +1787,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
             obscureText: true,
             enableSuggestions: false,
             autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: 'Cookie / MUSIC_U（仅本次输入）',
-            ),
+            decoration: const InputDecoration(labelText: '网易云登录凭据（仅本次输入）'),
           ),
           TextButton(
             onPressed: busy
@@ -1804,7 +1797,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                     if (!await confirmAction(
                       context,
                       '导入网易云凭据',
-                      '将你输入的 Cookie 经 HTTPS 发往已配置的私网后端，用于网易云授权。',
+                      '将登录凭据经 HTTPS 发送到已配置的服务器，用于网易云授权。',
                     )) {
                       return;
                     }
@@ -1825,7 +1818,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                       if (mounted) setState(() => busy = false);
                     }
                   },
-            child: const Text('导入到后端（不在手机保存）'),
+            child: const Text('导入凭据（不在手机保存）'),
           ),
           TextButton(
             onPressed: () => showApiResult(
@@ -1836,14 +1829,14 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                 '/api/v1/music/netease/login/refresh',
               ),
             ),
-            child: const Text('刷新网易云凭证'),
+            child: const Text('刷新网易云登录'),
           ),
           TextButton(
             onPressed: () async {
               if (await confirmAction(
                 context,
                 '退出网易云',
-                '这会清除后端保存的网易云会话，并影响车机在线音乐。',
+                '这会清除服务器保存的网易云登录，并影响车机在线音乐。',
               )) {
                 if (!context.mounted) return;
                 await showApiResult(
@@ -1910,7 +1903,7 @@ class MediaAdminPage extends StatelessWidget {
               if (await confirmAction(
                 context,
                 '扫描音乐库',
-                '扫描后端默认音乐目录并更新索引，不更改扫描目录。',
+                '扫描服务器上的默认音乐目录并更新曲库。',
               )) {
                 if (context.mounted) {
                   await showApiResult(
@@ -1928,7 +1921,7 @@ class MediaAdminPage extends StatelessWidget {
               if (await confirmAction(
                 context,
                 '按配额清理缓存',
-                '后端会按 LRU 删除超出配额的缓存文件，不是清空全部歌曲。',
+                '服务器会删除超出配额的旧缓存文件，不是清空全部歌曲。',
               )) {
                 if (context.mounted) {
                   await showApiResult(
@@ -1939,10 +1932,10 @@ class MediaAdminPage extends StatelessWidget {
                 }
               }
             },
-            child: const Text('按后端配额执行 LRU 清理'),
+            child: const Text('按服务器配额清理缓存'),
           ),
           const Text(
-            '不开放任意服务器目录输入，也不自动扫描或清理。',
+            '不提供任意服务器目录输入，也不会自动扫描或清理缓存。',
             style: TextStyle(color: _muted),
           ),
         ]),

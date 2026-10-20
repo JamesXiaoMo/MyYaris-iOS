@@ -264,9 +264,9 @@ void main() {
         ),
       );
       expect(find.byType(Slider), findsNothing);
-      expect(find.text('音量：未知/不可用，未采用默认值'), findsOneWidget);
+      expect(find.text('音量：暂无车机音量，未采用默认值'), findsOneWidget);
       expect(find.byKey(const ValueKey('queue-mode-menu')), findsOneWidget);
-      expect(find.textContaining('实际模式待确认'), findsOneWidget);
+      expect(find.textContaining('模式待确认'), findsOneWidget);
       final now = DateTime.now().toUtc().toIso8601String();
       session.playback = {
         'current_track_id': 'netease_123',

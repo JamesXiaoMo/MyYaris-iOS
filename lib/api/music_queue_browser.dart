@@ -42,15 +42,18 @@ Future<void> showQueueModes(
             if (!session.ownerQueueAllowed)
               const Padding(
                 padding: EdgeInsets.all(12),
-                child: Text('当前账号无Owner喜欢歌单权限'),
+                child: Text('当前账号没有此歌单的播放权限'),
               ),
             if (!session.queueV2Ready)
               const Padding(
                 padding: EdgeInsets.all(12),
-                child: Text('车机尚未确认新版队列能力，未伪报模式已应用'),
+                child: Text('车机尚未确认支持此播放模式'),
               ),
-            for (final item in playbackModeLabels.entries.where((item) =>
-                item.key != 'single_loop' || session.appliedQueueMode == 'single_loop'))
+            for (final item in playbackModeLabels.entries.where(
+              (item) =>
+                  item.key != 'single_loop' ||
+                  session.appliedQueueMode == 'single_loop',
+            ))
               ListTile(
                 key: ValueKey('queue-mode-${item.key}'),
                 enabled:
@@ -86,7 +89,7 @@ Future<void> showQueueModes(
     if (context.mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('模式请求已提交，等待车机实际应用')));
+      ).showSnackBar(const SnackBar(content: Text('已请求切换模式，等待车机确认')));
     }
   } catch (e) {
     if (context.mounted) {
@@ -111,7 +114,7 @@ class QueueModeCaption extends StatelessWidget {
         children: [
           Text(
             !session.hasAppliedQueue || actual == null
-                ? '实际模式待确认 · 默认来源：我喜欢的音乐'
+                ? '模式待确认 · 默认：我喜欢的音乐'
                 : '已应用：${appliedPlaybackLabel(session)}',
             style: const TextStyle(fontSize: 12, color: Colors.white60),
           ),
@@ -120,13 +123,13 @@ class QueueModeCaption extends StatelessWidget {
               requested != actual &&
               playbackModeLabels.containsKey(requested))
             Text(
-              '待应用：${playbackModeLabels[requested]}',
+              '等待车机确认：${playbackModeLabels[requested]}',
               style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
             ),
           if (session.queueV2Ready && session.playback['error_code'] != null)
             Text(
               queueErrorMessages[session.playback['error_code']] ??
-                  '车机回报执行异常，请刷新状态',
+                  '车机执行异常，请刷新状态',
               style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
             ),
           TextButton(
@@ -189,7 +192,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
   Future<void> load({bool reset = false}) async {
     if (busy) return;
     if (!widget.session.ownerQueueAllowed) {
-      setState(() => error = '当前账号无Owner喜欢歌单权限');
+      setState(() => error = '当前账号没有此歌单的播放权限');
       return;
     }
     final gen = ++generation, used = who;
@@ -231,10 +234,10 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
       if (mounted && gen == generation && used == who) {
         setState(() {
           error = e is ApiFailure && e.statusCode == 403
-              ? '当前账号无Owner喜欢歌单权限'
+              ? '当前账号没有此歌单的播放权限'
               : e is ApiFailure
               ? e.message
-              : '队列读取失败';
+              : '加载失败';
           if (e is ApiFailure && e.statusCode == 409) {
             first = null;
             tracks = [];
@@ -253,7 +256,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
   Future<void> select(Map<String, dynamic> track) async {
     try {
       if (first?.source != 'netease_favorite') {
-        throw ApiFailure('请从我喜欢的音乐选择；当前队列点播路径尚未验收');
+        throw ApiFailure('请先打开我喜欢的音乐，再选择歌曲播放');
       }
       await widget.session.playFavoriteTrack(
         track,
@@ -272,10 +275,10 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('播放队列'),
+      title: const Text('播放列表'),
       actions: [
         IconButton(
-          tooltip: '刷新队列',
+          tooltip: '刷新播放列表',
           onPressed: busy ? null : () => load(reset: true),
           icon: const Icon(Icons.refresh),
         ),
@@ -294,14 +297,14 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
         ),
         if (first != null)
           Text(
-            '已读取 ${tracks.length} / ${first!.total} 首 · ${accumulator.complete ? '元数据完整' : '尚未读完'}，读取不代表车机已应用',
+            '已加载 ${tracks.length} / ${first!.total} 首${accumulator.complete ? '' : '，正在继续加载'}',
           ),
         if (error != null)
           Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
         if (error != null)
           TextButton(
             onPressed: busy ? null : () => load(reset: true),
-            child: const Text('重新读取队列'),
+            child: const Text('重新加载'),
           ),
         if (busy) const Center(child: CircularProgressIndicator()),
         for (final track in tracks)
@@ -320,7 +323,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
             onPressed: busy ? null : () => load(),
             child: const Text('加载更多'),
           ),
-        if (!busy && error == null && tracks.isEmpty) const Text('暂无队列曲目'),
+        if (!busy && error == null && tracks.isEmpty) const Text('暂无歌曲'),
       ],
     ),
   );

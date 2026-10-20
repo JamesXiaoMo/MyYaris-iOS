@@ -3,7 +3,12 @@ import 'favorites.dart';
 import 'backend.dart';
 
 class FolderEditor extends StatefulWidget {
-  const FolderEditor({super.key, required this.service, this.folder, this.onReconcile});
+  const FolderEditor({
+    super.key,
+    required this.service,
+    this.folder,
+    this.onReconcile,
+  });
   final FavoritesApi service;
   final FavoriteFolder? folder;
   final Future<void> Function()? onReconcile;
@@ -74,7 +79,7 @@ class _FolderEditorState extends State<FolderEditor> {
         FilledButton(
           key: const ValueKey('folder-save'),
           onPressed: busy || uncertain ? null : save,
-          child: const Text('保存到后端'),
+          child: const Text('保存'),
         ),
       ],
     ),

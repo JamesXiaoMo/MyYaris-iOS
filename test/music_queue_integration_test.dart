@@ -452,7 +452,7 @@ void main() {
       await tester.scrollUntilVisible(find.text('加载更多'), 500, maxScrolls: 15);
       await tester.tap(find.text('加载更多'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('未混合分页'), findsOneWidget);
+      expect(find.textContaining('播放列表已更新'), findsOneWidget);
       expect(find.textContaining('50 / 65'), findsNothing);
       expect(count, 2);
     },
@@ -478,7 +478,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('queue-mode-menu')));
       await tester.pumpAndSettle();
       expect(find.byType(ListTile), findsNWidgets(3));
-      expect(find.byKey(const ValueKey('queue-mode-single_loop')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('queue-mode-single_loop')),
+        findsNothing,
+      );
       final tile = tester.widget<ListTile>(
         find.byKey(const ValueKey('queue-mode-intelligence')),
       );
@@ -509,7 +512,7 @@ void main() {
     await tester.pump();
     late.complete(reply(fixture(0, 50)));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Owner喜欢歌单权限'), findsOneWidget);
+    expect(find.textContaining('当前账号没有此歌单的播放权限'), findsOneWidget);
     expect(find.textContaining('50 / 65'), findsNothing);
   });
   test(

@@ -268,7 +268,7 @@ void main() {
           'fixture-password',
           '',
         ),
-        throwsA(predicate((e) => e is ApiFailure && e.message == '后端未开放普通注册')),
+        throwsA(predicate((e) => e is ApiFailure && e.message == '服务器未开放普通注册')),
       );
     },
   );

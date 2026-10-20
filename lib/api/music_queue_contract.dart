@@ -54,10 +54,10 @@ class MusicQueuePage {
         offset + rows.length > total ||
         more != (offset + rows.length < total) ||
         (more && rows.isEmpty)) {
-      throw ApiFailure('队列分页或版本格式不符，未启用新播放模式');
+      throw ApiFailure('播放列表数据异常，未切换播放模式');
     }
     if (source == 'netease_intelligence' && data['queue_state'] != 'ready') {
-      throw ApiFailure('心动批次尚未就绪');
+      throw ApiFailure('心动模式暂时未准备好，请稍后重试');
     }
     final tracks = <Map<String, dynamic>>[], seen = <String>{};
     for (var i = 0; i < rows.length; i++) {
@@ -67,19 +67,19 @@ class MusicQueuePage {
           (row['track_id'] as String).isEmpty ||
           row['queue_index'] != offset + i ||
           !seen.add(row['track_id'])) {
-        throw ApiFailure('队列曲目索引缺失或重复，未建立完整队列');
+        throw ApiFailure('播放列表歌曲信息异常，请刷新后重试');
       }
       if ((row['song_id'] is! int ||
           row['song_id'] <= 0 ||
           row['track_id'] != 'netease_${row['song_id']}')) {
-        throw ApiFailure('网易云队列曲目ID不符，未建立完整队列');
+        throw ApiFailure('歌曲信息不一致，请刷新后重试');
       }
       if (row['title'] is! String ||
           row['artist'] is! String ||
           row['duration_ms'] is! int ||
           row['duration_ms'] < 0 ||
           (row['playable'] != null && row['playable'] is! bool)) {
-        throw ApiFailure('队列曲目元数据格式不符');
+        throw ApiFailure('歌曲信息不完整，请刷新后重试');
       }
       final stream = row['stream_url'] is String
           ? Uri.tryParse(row['stream_url'])
@@ -95,7 +95,7 @@ class MusicQueuePage {
                     origin == null ||
                     stream.origin != origin.origin)
               : (stream.hasAuthority || !stream.path.startsWith('/')))) {
-        throw ApiFailure('队列流地址不符合私网HTTPS代理契约');
+        throw ApiFailure('音频地址暂时不可用，请稍后重试');
       }
       // Never forward an example/CDN/local HTTP URL from queue metadata as a
       // playable stream. Existing HTTPS resolution must validate each selection.
@@ -143,7 +143,7 @@ class MusicQueueAccumulator {
                 page.established != first.established ||
                 !_hasMore)) ||
         page.tracks.any((track) => _ids.contains(track['track_id']))) {
-      throw ApiFailure('队列版本已变化或分页重复，请清空后重读；未混合队列');
+      throw ApiFailure('播放列表已更新，请重新加载');
     }
     _first ??= page;
     _tracks.addAll(page.tracks);

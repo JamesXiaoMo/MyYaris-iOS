@@ -101,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
             enabled: !busy,
             autocorrect: false,
             decoration: const InputDecoration(
-              labelText: 'HTTPS 服务地址',
+              labelText: '服务器地址（HTTPS）',
               border: OutlineInputBorder(),
             ),
           ),

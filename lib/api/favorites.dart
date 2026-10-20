@@ -94,7 +94,7 @@ class FavoriteFolder {
         json['name'] is! String ||
         json['favorite_count'] is! int ||
         (json['favorite_count'] as int) < 0) {
-      throw ApiFailure('分类列表格式不符，请核对后端契约');
+      throw ApiFailure('分类数据异常，请刷新后重试');
     }
     return FavoriteFolder(
       id: json['id'],
@@ -128,7 +128,7 @@ String favoriteError(Object error) {
     403 => '当前账号无收藏管理权限，请联系管理员',
     404 => '地址或分类已不存在，列表已请求刷新',
     409 => '分类名称已存在，请刷新后使用已有分类或改名',
-    422 => '名称、坐标或分类不符合后端规则，请检查输入',
+    422 => '名称、坐标或分类不符合规则，请检查输入',
     _ => error.message,
   };
 }
@@ -209,7 +209,7 @@ class FavoritesApi {
       if ((spec['components']
               as Map?)?['schemas']?['DestinationResolveRequest']?['properties']?['reference_coordinate'] ==
           null) {
-        throw ApiFailure('当前后端尚未支持短码参考位置，请等待更新或使用完整Plus Code');
+        throw ApiFailure('当前服务器暂不支持短码参考位置，请使用完整 Plus Code');
       }
     }
     final result = await transport.resolveDestination(
@@ -270,7 +270,7 @@ class FavoritesApi {
         more is! bool ||
         items.any((e) => e is! Map) ||
         (more && items.isEmpty)) {
-      throw ApiFailure('收藏分页格式不符，请核对后端契约');
+      throw ApiFailure('收藏数据异常，请刷新后重试');
     }
     return FavoritePage(
       items.map((e) => decode(Map<String, dynamic>.from(e as Map))).toList(),
@@ -331,7 +331,7 @@ class FavoritesApi {
       result.addAll(next.items);
       if (!next.hasMore) return result;
       offset = next.nextOffset;
-      if (offset > 10000) throw ApiFailure('收藏分页过多，请使用搜索筛选');
+      if (offset > 10000) throw ApiFailure('收藏过多，请使用搜索筛选');
     }
   }
 

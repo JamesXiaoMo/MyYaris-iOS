@@ -41,9 +41,7 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
       await widget.session.playFavoriteTrack(track);
       if (mounted && who == model.identity) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('播放指令已提交；请打开音乐页右下角唱片，核对 commandID、执行回执与车机状态，不代表已经发声'),
-          ),
+          const SnackBar(content: Text('已发送播放请求，请到音乐页确认车机是否开始播放')),
         );
       }
     } catch (e) {
@@ -123,11 +121,9 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '服务器 Owner 的私人网易云歌单，仅 MyYaris 管理员可查看；不是每位注册用户各自的网易云账号。',
-                      ),
+                      const Text('这是服务器管理员的网易云喜欢歌单，仅管理员账号可以查看。'),
                       const SizedBox(height: 8),
-                      const Text('列出曲目不等于可完整播放；仅点击选歌后检查资源首段，VIP/地区限制可能仅可试听。'),
+                      const Text('部分歌曲可能因版权或会员限制只能试听。'),
                       if (model.loaded)
                         Text(
                           model.statusLine,
@@ -196,11 +192,11 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                   leading: cover(track),
                   title: Text(track['title'] as String),
                   subtitle: Text(
-                    '${track['artist']} · ${track['album'] ?? ''}\n${duration ~/ 60000}:${((duration ~/ 1000) % 60).toString().padLeft(2, '0')} · song_id ${track['song_id']} · netease\n${unavailable
-                        ? '不可用：版权或地区限制'
+                    '${track['artist']} · ${track['album'] ?? ''}\n${duration ~/ 60000}:${((duration ~/ 1000) % 60).toString().padLeft(2, '0')} · ${unavailable
+                        ? '暂不可播放（版权或地区限制）'
                         : (track['fee'] as num? ?? 0) > 0
-                        ? '需账号权益；可能仅可试听，点击后检查'
-                        : '可播性待检查'}',
+                        ? '可能需要会员，点击后确认'
+                        : '点击发送到车机'}',
                   ),
                   isThreeLine: true,
                   trailing: Icon(disabled ? Icons.block : Icons.play_arrow),

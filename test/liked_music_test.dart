@@ -661,7 +661,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('liked-sync-retry')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('liked-sync-error')), findsNothing);
-      expect(find.textContaining('song_id 1'), findsOneWidget);
+      expect(find.textContaining('song_id'), findsNothing);
+      expect(find.textContaining('Owner'), findsNothing);
+      expect(find.textContaining('点击发送到车机'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

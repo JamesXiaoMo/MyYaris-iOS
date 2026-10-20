@@ -21,15 +21,15 @@ List<Map<String, dynamic>> requireTrueIntelligence(
   }
   final songs = response['songs'];
   if (songs is! List || songs.isEmpty || songs.length > 100) {
-    throw ApiFailure('心动模式未返回有效曲目，未建立播放队列');
+    throw ApiFailure('心动模式暂时没有可用歌曲，请稍后重试');
   }
   final seen = <int>{};
   final tracks = <Map<String, dynamic>>[];
   for (final song in songs) {
-    if (song is! Map) throw ApiFailure('心动曲目格式不符，未建立播放队列');
+    if (song is! Map) throw ApiFailure('心动歌曲信息异常，请稍后重试');
     final id = song['id'];
     if (id is! int || id <= 0) {
-      throw ApiFailure('心动曲目缺少有效网易云ID，未建立播放队列');
+      throw ApiFailure('心动歌曲信息不完整，请稍后重试');
     }
     if (seen.add(id)) tracks.add(Map<String, dynamic>.from(song));
   }

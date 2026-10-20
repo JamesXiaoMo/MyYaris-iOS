@@ -57,21 +57,21 @@ class ApiFailure implements Exception {
 
 const queueErrorMessages = <String, String>{
   'PLAYBACK_CONSECUTIVE_FAILURES': '连续三首播放失败，请检查网络或网易云权限',
-  'OWNER_QUEUE_PERMISSION_DENIED': '当前账号无Owner喜欢歌单权限，请使用管理员账号',
-  'TRACK_NOT_IN_QUEUE': '曲目不在指定喜欢快照内，请刷新后重选',
-  'QUEUE_SOURCE_MISMATCH': '指定快照不是喜欢歌单，未退为单曲',
-  'QUEUE_INDEX_MISMATCH': '曲目与快照索引不一致，请刷新后重选',
-  'QUEUE_VERSION_CONFLICT': '队列版本已变化，请从第一页刷新，未混合分页',
-  'FAVORITE_REVISION_CONFLICT': '喜欢歌单版本已更新，正在重新同步，未混合分页',
-  'QUEUE_PRECONDITION_FAILED': '车机队列已变化，请刷新后重新确认操作',
+  'OWNER_QUEUE_PERMISSION_DENIED': '当前账号没有此歌单的播放权限，请使用管理员账号',
+  'TRACK_NOT_IN_QUEUE': '这首歌已不在当前歌单中，请刷新后重选',
+  'QUEUE_SOURCE_MISMATCH': '当前播放列表已变化，未改为单曲播放',
+  'QUEUE_INDEX_MISMATCH': '歌曲顺序已变化，请刷新后重选',
+  'QUEUE_VERSION_CONFLICT': '播放列表已更新，请刷新后重试',
+  'FAVORITE_REVISION_CONFLICT': '喜欢歌单已更新，正在重新同步',
+  'QUEUE_PRECONDITION_FAILED': '车机播放列表已变化，请刷新后重试',
   'EMPTY_PLAYLIST': '我喜欢的音乐为空',
-  'QUEUE_NOT_READY': '队列尚未就绪，请稍后重试',
-  'INTELLIGENCE_AUTH_INVALID': '网易云授权失效，心动模式不可用，请管理者在账号页处理',
+  'QUEUE_NOT_READY': '播放列表尚未准备好，请稍后重试',
+  'INTELLIGENCE_AUTH_INVALID': '网易云授权失效，心动模式不可用，请管理员在账号页处理',
   'INTELLIGENCE_UPSTREAM_FAILED': '网易云心动服务暂不可用，未切为相似歌曲或随机',
-  'INTELLIGENCE_QUEUE_EXHAUSTED': '心动队列已耗尽，请切回喜欢歌单',
-  'CAPABILITY_NOT_SUPPORTED': '车机尚不支持新版队列，请等待车机审核和升级',
+  'INTELLIGENCE_QUEUE_EXHAUSTED': '心动歌曲已播完，请切回喜欢歌单',
+  'CAPABILITY_NOT_SUPPORTED': '当前车机暂不支持此播放模式，请更新车机后重试',
   'INVALID_SEED_SONG': '心动种子必须属于我喜欢的音乐',
-  'COMMAND_CONFLICT': '指令ID冲突，未自动重试',
+  'COMMAND_CONFLICT': '操作重复，未自动重试',
   'SEEK_PARAMETER_CONFLICT': '进度参数冲突',
 };
 
@@ -98,7 +98,7 @@ String safeErrorCode(Map value) {
     'COMMAND_EXECUTION_ERROR',
   };
   if (queueErrorMessages.containsKey(code)) return queueErrorMessages[code]!;
-  return allowed.contains(code) ? code : '接口错误（请核对后端脱敏日志）';
+  return allowed.contains(code) ? code : '操作未完成，请稍后重试';
 }
 
 enum HomeConnectionState { checking, backendOffline, carOffline, online }
@@ -141,7 +141,7 @@ class BackendApi {
         u.hasQuery ||
         u.hasFragment ||
         (u.path.isNotEmpty && u.path != '/')) {
-      throw ApiFailure('请输入无路径、无凭据的 HTTPS 后端地址');
+      throw ApiFailure('请输入有效的 HTTPS 服务器地址');
     }
     return u;
   }
@@ -191,23 +191,23 @@ class BackendApi {
               ? queueErrorMessages[queueCode]!
               : response.statusCode == 403
               ? (path.endsWith('/auth/register')
-                    ? '后端未开放普通注册'
+                    ? '服务器未开放普通注册'
                     : '账号未获此操作或当前车机权限，请联系管理员授权')
               : response.statusCode == 429
               ? '请求暂时受限或账户冷却中，请稍后重试'
               : {404, 405, 501}.contains(response.statusCode) &&
                     path.endsWith('/auth/register')
-              ? '当前后端未开放普通注册或版本尚未支持'
+              ? '当前服务器未开放普通注册或版本暂不支持'
               : response.statusCode == 400 && path.endsWith('/auth/register')
-              ? '注册失败：用户名不可用或不符合后端规则'
-              : '接口返回 HTTP ${response.statusCode}，请重试或核对后端',
+              ? '注册失败：用户名不可用或不符合服务器规则'
+              : '服务器暂时不可用（错误码 ${response.statusCode}），请稍后重试',
           statusCode: response.statusCode,
           errorCode: queueCode,
         );
       }
       if (response.body.isEmpty) return {};
       final value = jsonDecode(utf8.decode(response.bodyBytes));
-      if (value is! Map<String, dynamic>) throw ApiFailure('接口响应格式不符');
+      if (value is! Map<String, dynamic>) throw ApiFailure('服务器响应格式异常，请稍后重试');
       if (value['code'] is num &&
           (value['code'] as num) >= 400 &&
           (value['code'] as num) != 800 &&
@@ -220,7 +220,7 @@ class BackendApi {
     } on TimeoutException {
       throw ApiFailure('请求超时；写操作结果可能不确定，请先查询状态，不自动重发');
     } catch (_) {
-      throw ApiFailure('网络连接失败，请检查 Tailscale、HTTPS 和后端状态');
+      throw ApiFailure('网络连接失败，请检查网络或服务器状态');
     }
   }
 
@@ -251,7 +251,7 @@ class BackendApi {
             as Map?;
     if (legacy?.containsKey('auto_create_task') != true ||
         task?.containsKey('target_device_id') != true) {
-      throw ApiFailure('后端尚未提供本轮两阶段契约标识；已阻止旧版提前派发，请等待后端部署');
+      throw ApiFailure('服务器版本暂不支持此操作，未发送到车机，请稍后重试');
     }
   }
 
@@ -295,7 +295,7 @@ class BackendApi {
       },
     );
     if (result['task_id'] != null) {
-      throw ApiFailure('解析阶段意外生成任务，已停止后续派发，请核对后端契约');
+      throw ApiFailure('解析结果异常，已停止发送，请重试');
     }
     return result;
   }
@@ -323,7 +323,7 @@ class BackendApi {
           );
     if (result['device_id'] != null &&
         !MusicContract.sameDevice(result['device_id'], deviceId)) {
-      throw ApiFailure('已提交但后端返回目标设备不符，勿重复派发');
+      throw ApiFailure('服务器返回的车机信息不一致，请勿重复发送');
     }
     return result;
   }
@@ -339,7 +339,7 @@ class BackendApi {
         voice['resolve_only'] == true &&
         voice['mock'] != true;
     if (!ready) {
-      throw ApiFailure('后端未确认真实 ASR/NLP provider 就绪，语音解析暂不可用；文字导航仍可使用');
+      throw ApiFailure('语音识别服务暂不可用，请改用文字输入目的地');
     }
   }
 
@@ -366,15 +366,15 @@ class BackendApi {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ApiFailure(
           response.statusCode == 501 || response.statusCode == 503
-              ? '语音能力暂不可用（HTTP ${response.statusCode}），请配置后端 ASR/NLP provider'
-              : '音频上传返回 HTTP ${response.statusCode}',
+              ? '语音识别服务暂不可用，请稍后重试或使用文字输入'
+              : '音频上传失败，请稍后重试',
         );
       }
       final data = Map<String, dynamic>.from(
         jsonDecode(utf8.decode(response.bodyBytes)) as Map,
       );
       if (data['status'] == 'failed' || data['status'] == 'unavailable') {
-        throw ApiFailure('后端未完成语音转写/解析；${safeErrorCode(data)}');
+        throw ApiFailure('语音识别未完成，请重试');
       }
       return data;
     } on ApiFailure {
@@ -456,13 +456,13 @@ class BackendApi {
     if (response['success'] == false ||
         response['available'] == false ||
         response['error_code'] != null) {
-      throw ApiFailure('网易云搜索服务不可用，请核对后端及账号/地区条件');
+      throw ApiFailure('网易云搜索暂时不可用，请稍后重试');
     }
     if (songs is! List || response['total'] is! num) {
-      throw ApiFailure('网易云搜索响应格式错误，不当作无结果');
+      throw ApiFailure('网易云搜索响应异常，请稍后重试');
     }
     final normalized = songs.map((item) {
-      if (item is! Map) throw ApiFailure('搜索曲目格式错误');
+      if (item is! Map) throw ApiFailure('搜索结果异常，请稍后重试');
       final track = Map<String, dynamic>.from(item);
       final id = songId(track);
       return {...track, 'id': id, 'song_id': id, 'source': 'netease'};
@@ -482,7 +482,7 @@ class BackendApi {
     if (resource['song_id'] != id ||
         resource['url'] is! String ||
         (resource['url'] as String).trim().isEmpty) {
-      throw ApiFailure('该曲目未取得可播资源；可能受账号、会员、地区或上游限制。请在App设置检查网易云授权或换歌');
+      throw ApiFailure('这首歌曲暂时无法播放；可能受版权、会员或地区限制，请检查网易云授权或换一首');
     }
     return probeStream({...track, 'source': 'netease', 'song_id': id});
   }
@@ -507,7 +507,7 @@ class BackendApi {
           .timeout(const Duration(seconds: 15));
       await checkAuthStatus(response.statusCode, streamPath(track), usedToken);
       if (response.statusCode != 200 && response.statusCode != 206) {
-        throw ApiFailure('音频首段检查返回 HTTP ${response.statusCode}，未发送播放指令');
+        throw ApiFailure('歌曲资源检查失败，未发送播放指令');
       }
       final type = (response.headers['content-type'] ?? '')
           .split(';')
@@ -517,7 +517,7 @@ class BackendApi {
       if (!type.startsWith('audio/') &&
           type != 'application/octet-stream' &&
           type != 'application/ogg') {
-        throw ApiFailure('响应不是音频 Content-Type，未发送播放指令');
+        throw ApiFailure('歌曲资源格式不支持，未发送播放指令');
       }
       final range = response.headers['content-range'] ?? '';
       final match = RegExp(r'^bytes 0-([0-9]+)/([0-9]+)$').firstMatch(range);
@@ -525,7 +525,7 @@ class BackendApi {
           (match == null ||
               int.parse(match[1]!) > 1023 ||
               int.parse(match[2]!) <= int.parse(match[1]!))) {
-        throw ApiFailure('206音频范围不符合请求，未发送播放指令');
+        throw ApiFailure('音频数据异常，未发送播放指令');
       }
       final sample = <int>[];
       await for (final chunk in response.stream.timeout(
@@ -551,7 +551,7 @@ class BackendApi {
                   'WAVE') ||
           (sample.length >= 12 &&
               ascii.decode(sample.sublist(4, 8), allowInvalid: true) == 'ftyp');
-      if (!audioHeader) throw ApiFailure('首段缺少支持的音频头，未发送播放指令');
+      if (!audioHeader) throw ApiFailure('歌曲资源格式不支持，未发送播放指令');
       return {
         'http_status': response.statusCode,
         'content_type': type,
@@ -564,7 +564,7 @@ class BackendApi {
     } on ApiFailure {
       rethrow;
     } catch (_) {
-      throw ApiFailure('音频首段检查失败或超时，未发送播放指令');
+      throw ApiFailure('歌曲资源检查失败或超时，未发送播放指令');
     } finally {
       if (!abort.isCompleted) abort.complete();
     }
@@ -659,7 +659,7 @@ class BackendSession extends ChangeNotifier {
 
   String get homeConnectionLabel => switch (homeConnectionState) {
     HomeConnectionState.checking => '检测中',
-    HomeConnectionState.backendOffline => '后端未连接',
+    HomeConnectionState.backendOffline => '服务器未连接',
     HomeConnectionState.carOffline => '车机未连接',
     HomeConnectionState.online => '在线',
   };
@@ -975,10 +975,10 @@ class BackendSession extends ChangeNotifier {
     if (api.configured &&
         u.origin != BackendApi.validateBase(api.baseUrl).origin &&
         !tokenProvided) {
-      throw ApiFailure('更换后端地址时，请重新提供对应手机 Token；不会把旧凭据发往新地址');
+      throw ApiFailure('更换服务器地址时，请重新登录；旧凭据不会发送到新地址');
     }
     if (RegExp(r'\s').hasMatch(token.trim())) {
-      throw ApiFailure('请只输入手机 Token，不包含 Bearer 前缀或空白');
+      throw ApiFailure('请只输入服务器登录凭据，不包含 Bearer 前缀或空白');
     }
     await store.save(
       jsonEncode({
@@ -1341,7 +1341,7 @@ class BackendSession extends ChangeNotifier {
         health = h;
         backendOnline = {'ok', 'healthy'}.contains(h['status']);
         publish();
-        if (backendOnline != true) throw ApiFailure('后端健康检测未通过');
+        if (backendOnline != true) throw ApiFailure('服务器连接检测未通过');
       } catch (_) {
         if (gen == generation && !disposed) {
           backendOnline = false;
@@ -1359,12 +1359,12 @@ class BackendSession extends ChangeNotifier {
       health = h;
       if (p['device_id'] != null &&
           !MusicContract.sameDevice(p['device_id'], api.deviceId)) {
-        throw ApiFailure('后端返回的设备不匹配，未应用快照');
+        throw ApiFailure('车机信息不匹配，未采用这次状态');
       }
       final validated = MusicContract.statusPatch(MusicContract.envelope(p));
-      if (validated.isEmpty) throw ApiFailure('后端快照无有效状态，保留最后一次状态');
+      if (validated.isEmpty) throw ApiFailure('未收到有效车机状态，保留上次显示');
       if (!acceptPlaybackPatch(validated)) return;
-      connection = '后端可达';
+      connection = '已连接';
       verifyLog('HTTP_STATE_RECEIVED');
       statusReceivedAt = DateTime.now();
       await syncCurrentTrack();
@@ -1512,23 +1512,23 @@ class BackendSession extends ChangeNotifier {
       'status': status,
       if (data['error_code'] != null) 'error_code': safeErrorCode(data),
     };
-    if (status == 'failed') lastMessage = '车机回执失败：${safeErrorCode(data)}';
+    if (status == 'failed') lastMessage = '车机执行失败，请稍后重试';
     verifyLog('COMMAND_STATE_RECEIVED');
     publish();
   }
 
   String get commandLabel => switch (lastCommandState['status']) {
-    'queued' => '指令已排队，车机结果待回报',
-    'sent' => '后端已投递，车机结果待回报',
-    'received' => '车机已接收，尚未确认执行',
-    'applied' || 'executed' => '车机回执：操作已应用（播放状态另行核对）',
-    'failed' => '车机回执：执行失败',
-    'denied' => '后端拒绝当前账号控车权限，未当作车机执行结果',
-    'expired' => '指令已过期，不会由手机自动重发',
-    'accepted' => '后端已接收，执行结果待回报',
-    'submitting' => '指令正在提交',
-    'unknown' => '指令结果未知，请先核对车机状态',
-    _ => '尚无指令执行回执',
+    'queued' => '已排队，等待车机处理',
+    'sent' => '已发送到车机，等待结果',
+    'received' => '车机已收到，尚未确认执行',
+    'applied' || 'executed' => '车机已应用，播放状态请以页面为准',
+    'failed' => '车机执行失败',
+    'denied' => '当前账号无权限控制车机',
+    'expired' => '操作已过期，需要重新发起',
+    'accepted' => '已提交，等待车机结果',
+    'submitting' => '正在提交',
+    'unknown' => '结果未知，请核对车机状态',
+    _ => '尚未收到车机结果',
   };
   Future<void> refreshCommandState() async {
     final id = lastCommandState['command_id'];
@@ -1544,7 +1544,7 @@ class BackendSession extends ChangeNotifier {
       }
     } catch (e) {
       if (gen == generation && !disposed) {
-        lastMessage = '执行状态暂未更新：$e';
+        lastMessage = '执行状态暂未更新，请稍后重试';
         publish();
       }
     }
@@ -1579,7 +1579,7 @@ class BackendSession extends ChangeNotifier {
             });
             pending.complete();
           } else {
-            pending.completeError(ApiFailure('指令确认失败或状态未知，请核对车机'));
+            pending.completeError(ApiFailure('操作确认失败或状态未知，请核对车机'));
           }
         }
       }
@@ -1587,7 +1587,7 @@ class BackendSession extends ChangeNotifier {
         final error = MusicContract.envelope(m);
         pendingCommands
             .remove('${error['command_id']}')
-            ?.completeError(ApiFailure('后端拒绝指令：${safeErrorCode(error)}'));
+            ?.completeError(ApiFailure('车机执行失败，请稍后重试'));
       }
       if (m['type'] == 'status_snapshot' || m['type'] == 'status_update') {
         final data = MusicContract.statusPatch(MusicContract.envelope(m));
@@ -1603,7 +1603,7 @@ class BackendSession extends ChangeNotifier {
         publish();
       }
     } catch (_) {
-      realtime = '实时消息格式异常';
+      realtime = '实时连接异常，正在重试';
       publish();
     }
   }
@@ -1619,12 +1619,12 @@ class BackendSession extends ChangeNotifier {
     socket = null;
     for (final pending in pendingCommands.values) {
       if (!pending.isCompleted) {
-        pending.completeError(ApiFailure('实时连接断开，指令执行结果未知'));
+        pending.completeError(ApiFailure('实时连接已断开，操作结果未知'));
       }
     }
     pendingCommands.clear();
     pingTimer?.cancel();
-    realtime = '实时断开，HTTP 状态补偿';
+    realtime = '实时连接已断开，正在定时刷新';
     publish();
     final delay = min(30, 1 << min(5, failures++));
     reconnectTimer = Timer(
@@ -1669,7 +1669,7 @@ class BackendSession extends ChangeNotifier {
 
   Future<void> choosePlaybackMode(String mode) async {
     if (!canControlVehicle) throw ApiFailure('当前账号未授权目标车机');
-    if (!ownerQueueAllowed) throw ApiFailure('当前账号无Owner喜欢歌单权限');
+    if (!ownerQueueAllowed) throw ApiFailure('当前账号没有此歌单的播放权限');
     if (!queueV2Ready) {
       throw ApiFailure(queueErrorMessages['CAPABILITY_NOT_SUPPORTED']!);
     }
@@ -1703,7 +1703,7 @@ class BackendSession extends ChangeNotifier {
     int? queueVersion,
   }) async {
     if (!canControlVehicle) throw ApiFailure('当前账号未授权目标车机');
-    if (!ownerQueueAllowed) throw ApiFailure('当前账号无Owner喜欢歌单权限');
+    if (!ownerQueueAllowed) throw ApiFailure('当前账号没有此歌单的播放权限');
     if (!queueV2Ready) {
       throw ApiFailure(queueErrorMessages['CAPABILITY_NOT_SUPPORTED']!);
     }
@@ -1711,10 +1711,10 @@ class BackendSession extends ChangeNotifier {
         preparingTrack ||
         commandPending ||
         awaitingExecution) {
-      throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
+      throw ApiFailure('已有操作正在处理，请勿重复点击');
     }
     if ((queueId == null) != (queueVersion == null)) {
-      throw ApiFailure('浏览快照标识不完整');
+      throw ApiFailure('播放列表信息不完整，请刷新');
     }
     final who = '${api.baseUrl}\n${api.token}\n${api.deviceId}';
     final actualId = hasAppliedQueue ? playback['queue_id'] : null;
@@ -1735,17 +1735,17 @@ class BackendSession extends ChangeNotifier {
         if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
             disposed ||
             !foreground) {
-          throw ApiFailure('会话已切换，已丢弃旧队列');
+          throw ApiFailure('登录状态已切换，旧播放列表已清除');
         }
         if ((id != null && (page.id != id || page.version != version)) ||
             page.source != 'netease_favorite' ||
             page.offset != offset) {
-          throw ApiFailure('喜欢队列版本或来源变化，请刷新后重新选歌');
+          throw ApiFailure('喜欢歌单已变化，请刷新后重新选歌');
         }
         snapshot.add(page);
         id = page.id;
         version = page.version;
-        if (!page.established) throw ApiFailure('喜欢快照尚未完整建立，未发送选歌');
+        if (!page.established) throw ApiFailure('喜欢歌单尚未加载完成，未发送选歌');
         for (final row in page.tracks) {
           if (row['song_id'] == song) {
             member = row;
@@ -1754,14 +1754,14 @@ class BackendSession extends ChangeNotifier {
         }
         if (member != null || !page.hasMore) break;
         offset += page.tracks.length;
-        if (offset > 10000) throw ApiFailure('队列过大，请刷新后重试');
+        if (offset > 10000) throw ApiFailure('播放列表过大，请刷新后重试');
       }
-      if (member == null) throw ApiFailure('该曲目不在喜欢快照内，请刷新，未退为单曲');
+      if (member == null) throw ApiFailure('这首歌已不在喜欢歌单中，请刷新后重选');
       if (who != '${api.baseUrl}\n${api.token}\n${api.deviceId}' ||
           (actualId != null &&
               (playback['queue_id'] != actualId ||
                   playback['queue_version'] != actualVersion))) {
-        throw ApiFailure('会话或实际队列已变化，未发送过期选歌');
+        throw ApiFailure('登录状态或播放列表已变化，未发送这次选歌');
       }
       resolvingFavorite = false;
       await playTrack(
@@ -1789,7 +1789,7 @@ class BackendSession extends ChangeNotifier {
         preparingTrack ||
         commandPending ||
         awaitingExecution) {
-      throw ApiFailure('已有选歌/指令正在检查或提交，请勿重复点击');
+      throw ApiFailure('已有操作正在处理，请勿重复点击');
     }
     final origin = api.baseUrl, target = api.deviceId, credential = api.token;
     preparingTrack = true;
@@ -1804,18 +1804,18 @@ class BackendSession extends ChangeNotifier {
           api.baseUrl != origin ||
           api.deviceId != target ||
           api.token != credential) {
-        throw ApiFailure('App已离开前台或配置已改变，未发送过期选歌指令');
+        throw ApiFailure('App 已离开前台或设置已改变，未发送选歌指令');
       }
       if (queueContext['source'] == 'netease_favorite' &&
           (!ownerQueueAllowed || !queueV2Ready)) {
-        throw ApiFailure('喜欢队列权限或车机能力已变化，未发送选歌');
+        throw ApiFailure('权限或车机状态已变化，未发送选歌');
       }
       if (queueContext['source'] == 'netease_favorite' &&
           queueContext['expected_queue_id'] != null &&
           (playback['queue_id'] != queueContext['expected_queue_id'] ||
               playback['queue_version'] !=
                   queueContext['expected_queue_version'])) {
-        throw ApiFailure('实际队列已变化，未发送过期喜欢点歌');
+        throw ApiFailure('播放列表已变化，未发送这次选歌');
       }
       await sendCommand('play_track', {
         ...api.trackParams(track),
@@ -1849,7 +1849,7 @@ class BackendSession extends ChangeNotifier {
     if (!canControlVehicle) {
       throw ApiFailure('当前账号未授权车机 ${api.deviceId}，请联系管理员');
     }
-    if (commandPending) throw ApiFailure('正在等待上一条指令确认，请勿重复提交');
+    if (commandPending) throw ApiFailure('正在等待上一条操作确认，请勿重复提交');
     final validated = MusicContract.params(
       action,
       params,
@@ -1864,9 +1864,9 @@ class BackendSession extends ChangeNotifier {
     });
     if (issuedCommands.containsKey(id)) {
       if (issuedCommands[id] != signature) {
-        throw ApiFailure('同一 command_id 不得对应不同指令');
+        throw ApiFailure('同一操作不能对应不同指令');
       }
-      lastMessage = '该指令 ID 已提交过；未重复发送，执行结果仍以车机状态为准';
+      lastMessage = '该操作已提交过；未重复发送，请以车机状态为准';
       publish();
       return;
     }
@@ -1900,17 +1900,17 @@ class BackendSession extends ChangeNotifier {
           );
           await pending.future.timeout(const Duration(seconds: 10));
         } on TimeoutException {
-          throw ApiFailure('指令确认超时，结果未知；不自动通过 HTTP 重发');
+          throw ApiFailure('等待车机确认超时，结果未知；不会自动重发');
         } finally {
           pendingCommands.remove(id);
         }
       } else {
         final response = await api.command(action, validated, id);
         if (response['command_id'] != null && response['command_id'] != id) {
-          throw ApiFailure('后端确认指令 ID 不符，执行结果未知');
+          throw ApiFailure('服务器确认信息不一致，执行结果未知');
         }
         if (requestGeneration != generation || requestCredential != api.token) {
-          throw ApiFailure('会话已改变，不接受旧指令回执');
+          throw ApiFailure('登录状态已变化，不接受旧结果');
         }
         lastCommandReceipt = response;
         acceptCommandState({
@@ -1925,7 +1925,7 @@ class BackendSession extends ChangeNotifier {
       final duplicate =
           lastCommandReceipt['duplicate'] == true ||
           lastCommandReceipt['status'] == 'duplicate';
-      lastMessage = duplicate ? '后端识别到已有指令，未当作新指令；执行结果以车机状态为准' : commandLabel;
+      lastMessage = duplicate ? '服务器检测到重复操作，未当作新操作；请以车机状态为准' : commandLabel;
     } catch (e) {
       if (requestGeneration != generation || requestCredential != api.token) {
         rethrow;

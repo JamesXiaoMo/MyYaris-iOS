@@ -28,7 +28,7 @@ void main() {
             : {};
         session.publish();
         await tester.pump();
-        final label = ['后端未连接', '车机未连接', '在线'][state];
+        final label = ['服务器未连接', '车机未连接', '在线'][state];
         final color = [
           const Color(0xFFFF6370),
           const Color(0xFFFFCC66),

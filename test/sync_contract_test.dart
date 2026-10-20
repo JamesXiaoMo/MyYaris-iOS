@@ -354,7 +354,7 @@ void main() {
           },
         }),
       );
-      expect(session.commandLabel, contains('操作已应用'));
+      expect(session.commandLabel, contains('车机已应用'));
       session.consumeRealtime(
         jsonEncode({
           'type': 'command_status',
