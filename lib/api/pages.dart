@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'backend.dart';
 import 'music_queue_browser.dart';
+import 'playback_target.dart';
 import 'login_page.dart';
 export 'music_home.dart' show MusicPage, MusicPlayerPage;
 import '../apple_map.dart';
@@ -774,11 +775,15 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
     final who = identity;
     setState(() => selecting = true);
     try {
-      await widget.session.playTrack(track, singleTrack: true);
+      await widget.session.hub.playSingle(track);
       if (mounted && who == identity) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已发送播放请求，等待车机开始播放')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              widget.session.hub.phoneTarget ? '本机已准备播放' : '已发送播放请求，等待车机开始播放',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted && who == identity) {
@@ -799,7 +804,8 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
       body: ListView(
         padding: const EdgeInsets.all(22),
         children: [
-          if (!widget.session.canControlVehicle)
+          if (!widget.session.hub.phoneTarget &&
+              !widget.session.canControlVehicle)
             const Text(
               '账号已登录，但未授权当前车机；请联系管理员绑定后再播放。',
               style: TextStyle(color: Colors.orangeAccent),
@@ -862,14 +868,17 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
                 spacing: 8,
                 children: [
                   FilledButton.icon(
-                    onPressed:
-                        selecting ||
-                            widget.session.commandPending ||
-                            widget.session.awaitingExecution
+                    onPressed: selecting || !widget.session.hub.controlsReady
                         ? null
                         : () => play(track),
                     icon: const Icon(Icons.play_arrow),
-                    label: Text(selecting ? '正在发送…' : '发送到车机播放'),
+                    label: Text(
+                      selecting
+                          ? '正在准备…'
+                          : widget.session.hub.phoneTarget
+                          ? '在本机播放'
+                          : '发送到车机播放',
+                    ),
                   ),
                   TextButton(
                     onPressed: () => Navigator.push(
@@ -927,11 +936,15 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
     Map<String, dynamic> params = const {},
   ]) async {
     try {
-      await session.sendCommand(action, params);
+      await session.hub.command(action, params);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('指令已提交，等待车机状态回报')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              session.hub.phoneTarget ? '本机控制已应用' : '指令已提交，等待车机状态回报',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (context.mounted) {
@@ -946,17 +959,23 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: session,
     builder: (context, _) {
-      final p = session.playback;
-      final ready =
-          (session.queueV2Ready && session.ownerQueueAllowed) ||
-          !session.playbackStale &&
-              session.heartbeatFresh &&
-              p['current_track_id'] is String &&
-              (p['current_track_id'] as String).isNotEmpty;
-      final locked =
-          session.commandPending ||
-          session.preparingTrack ||
-          session.awaitingExecution;
+      final hub = session.hub, view = session.hub.view;
+      final p = hub.phoneTarget
+          ? <String, dynamic>{
+              'current_track_id': view.trackId,
+              'position_ms': view.positionMs,
+              'duration_ms': view.durationMs,
+              'software_volume': view.volume,
+            }
+          : session.playback;
+      final ready = hub.phoneTarget
+          ? session.userSignedIn
+          : (session.queueV2Ready && session.ownerQueueAllowed) ||
+                !session.playbackStale &&
+                    session.heartbeatFresh &&
+                    p['current_track_id'] is String &&
+                    (p['current_track_id'] as String).isNotEmpty;
+      final locked = !hub.controlsReady;
       final duration = (p['duration_ms'] as num?)?.toDouble() ?? 0;
       final seekKnown = ready && p['position_ms'] is num && duration > 0;
       final position = ((p['position_ms'] as num?)?.toDouble() ?? 0)
@@ -999,7 +1018,7 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${session.currentTrack['artist'] ?? '歌手信息暂不可用'}',
+                        view.artist.isEmpty ? '歌手信息暂不可用' : view.artist,
                         style: const TextStyle(
                           fontSize: 17,
                           color: Colors.white60,
@@ -1020,15 +1039,17 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             const SizedBox(height: 14),
             Row(
               children: [
-                const Icon(
-                  Icons.directions_car_outlined,
+                Icon(
+                  hub.phoneTarget
+                      ? Icons.phone_iphone
+                      : Icons.directions_car_outlined,
                   size: 18,
                   color: Colors.white54,
                 ),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    '车机 · ${session.homeMusicState}',
+                    '${view.targetLabel} · ${view.stateLabel}',
                     style: const TextStyle(color: Colors.white54, fontSize: 13),
                   ),
                 ),
@@ -1134,7 +1155,10 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('车机音量', style: TextStyle(color: Colors.white54)),
+                Text(
+                  '${view.targetLabel}音量',
+                  style: const TextStyle(color: Colors.white54),
+                ),
                 Text(
                   ready && volume != null
                       ? '${((volumeDraft ?? volume) * 100).round()}%'
@@ -1174,7 +1198,13 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
                 ),
               ],
             ),
-            if (locked || session.lastCommandState.isNotEmpty)
+            if (view.notice != null)
+              Text(
+                view.notice!,
+                style: const TextStyle(color: Colors.orangeAccent),
+              ),
+            if (!hub.phoneTarget &&
+                (locked || session.lastCommandState.isNotEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
@@ -1188,18 +1218,20 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
         );
       }
       return card([
+        PlaybackTargetPicker(session: session),
         Text(
-          '${session.currentTrack['title'] ?? p['current_track_id'] ?? '暂无播放曲目'}',
+          view.title,
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         Text(
-          '车机状态：${session.homeMusicState}',
+          '${view.targetLabel}状态：${view.stateLabel}',
           style: const TextStyle(color: _muted),
         ),
-        Text(
-          '车机连接：${session.heartbeatFresh ? '正常' : '等待更新'}',
-          style: const TextStyle(color: _muted, fontSize: 12),
-        ),
+        if (!hub.phoneTarget)
+          Text(
+            '车机连接：${session.heartbeatFresh ? '正常' : '等待更新'}',
+            style: const TextStyle(color: _muted, fontSize: 12),
+          ),
         Wrap(
           alignment: WrapAlignment.spaceAround,
           children: [
@@ -1251,8 +1283,8 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
             },
           ),
         ] else
-          const Text('进度：暂无车机进度'),
-        const Text('车机音量'),
+          const Text('进度：暂无播放进度'),
+        Text('${view.targetLabel}音量'),
         if (ready && volume != null)
           Slider(
             value: volumeDraft ?? volume,
@@ -1265,28 +1297,35 @@ class _PlaybackPanelState extends State<PlaybackPanel> {
         else
           const Text('音量：暂无车机音量，未采用默认值'),
         QueueModeCaption(session: session),
-        Text('车机：${session.api.deviceId}'),
-        Text(session.commandLabel),
-        if (session.preparingTrack) const Text('正在确认歌曲是否可播放，尚未发送播放指令'),
-        if (session.lastTrackProbe['status'] == 'failed')
+        if (view.notice != null)
           Text(
-            '歌曲无法播放：${session.lastTrackProbe['message'] ?? '请稍后重试'}',
+            view.notice!,
             style: const TextStyle(color: Colors.orangeAccent),
           ),
-        if (session.lastCommandState['error_code'] != null)
-          Text(
-            queueErrorMessages[session.lastCommandState['error_code']] ??
-                '车机返回错误，请稍后重试',
-            style: const TextStyle(color: Colors.orangeAccent),
+        if (!hub.phoneTarget) ...[
+          Text('车机：${session.api.deviceId}'),
+          Text(session.commandLabel),
+          if (session.preparingTrack) const Text('正在确认歌曲是否可播放，尚未发送播放指令'),
+          if (session.lastTrackProbe['status'] == 'failed')
+            Text(
+              '歌曲无法播放：${session.lastTrackProbe['message'] ?? '请稍后重试'}',
+              style: const TextStyle(color: Colors.orangeAccent),
+            ),
+          if (session.lastCommandState['error_code'] != null)
+            Text(
+              queueErrorMessages[session.lastCommandState['error_code']] ??
+                  '车机返回错误，请稍后重试',
+              style: const TextStyle(color: Colors.orangeAccent),
+            ),
+          TextButton(
+            onPressed: session.refreshCommandState,
+            child: const Text('刷新执行结果'),
           ),
-        TextButton(
-          onPressed: session.refreshCommandState,
-          child: const Text('刷新执行结果'),
-        ),
-        const Text(
-          '播放控制以车机回报为准；已送达不代表已开始播放。',
-          style: TextStyle(color: _muted, fontSize: 12),
-        ),
+          const Text(
+            '播放控制以车机回报为准；已送达不代表已开始播放。',
+            style: TextStyle(color: _muted, fontSize: 12),
+          ),
+        ],
       ]);
     },
   );
@@ -1347,7 +1386,7 @@ class _TrackPageState extends State<TrackPage> {
             TextButton(
               onPressed: () async {
                 try {
-                  await widget.session.choosePlaybackMode('intelligence');
+                  await widget.session.hub.chooseMode('intelligence');
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('已请求心动模式，等待车机确认')),
@@ -1717,7 +1756,10 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
       if (r['code'] == 800 || r['code'] == 803) {
         timer?.cancel();
         key = null;
-        if (r['code'] == 803) await loadStatus();
+        if (r['code'] == 803) {
+          widget.session.hub.reset();
+          await loadStatus();
+        }
       }
     } catch (e) {
       timer?.cancel();
@@ -1808,6 +1850,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                         '/api/v1/music/netease/login/cookie',
                         body: {'cookie': cookie.text.trim()},
                       );
+                      widget.session.hub.reset();
                       cookie.clear();
                       await loadStatus();
                       if (mounted) setState(() => message = '导入完成');
@@ -1839,6 +1882,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                 '这会清除服务器保存的网易云登录，并影响车机在线音乐。',
               )) {
                 if (!context.mounted) return;
+                widget.session.hub.reset();
                 await showApiResult(
                   context,
                   '退出登录',

@@ -10,6 +10,13 @@ const playbackModeLabels = <String, String>{
 };
 
 String appliedPlaybackLabel(BackendSession session) {
+  if (session.hub.phoneTarget) {
+    final q = session.hub.local.queue;
+    if (q == null) return '尚未选择曲目';
+    return q.isSingle && q.mode != 'single_loop'
+        ? '临时单曲'
+        : playbackModeLabels[q.mode] ?? '模式待确认';
+  }
   if (session.hasAppliedQueue &&
       session.playback['queue_source'] == 'single_track') {
     return session.appliedQueueMode == 'single_loop' ? '临时单曲 · 单曲循环' : '临时单曲';
@@ -44,7 +51,7 @@ Future<void> showQueueModes(
                 padding: EdgeInsets.all(12),
                 child: Text('当前账号没有此歌单的播放权限'),
               ),
-            if (!session.queueV2Ready)
+            if (!session.hub.phoneTarget && !session.queueV2Ready)
               const Padding(
                 padding: EdgeInsets.all(12),
                 child: Text('车机尚未确认支持此播放模式'),
@@ -52,16 +59,20 @@ Future<void> showQueueModes(
             for (final item in playbackModeLabels.entries.where(
               (item) =>
                   item.key != 'single_loop' ||
+                  session.hub.phoneTarget ||
                   session.appliedQueueMode == 'single_loop',
             ))
               ListTile(
                 key: ValueKey('queue-mode-${item.key}'),
                 enabled:
-                    session.ownerQueueAllowed &&
-                    session.canControlVehicle &&
-                    session.queueV2Ready &&
-                    !session.commandPending &&
-                    !session.awaitingExecution,
+                    session.hub.controlsReady &&
+                    (session.hub.phoneTarget
+                        ? session.userSignedIn &&
+                              (item.key == 'single_loop' ||
+                                  session.ownerQueueAllowed)
+                        : session.ownerQueueAllowed &&
+                              session.canControlVehicle &&
+                              session.queueV2Ready),
                 title: Text(item.value),
                 trailing:
                     session.appliedQueueMode == item.key &&
@@ -85,11 +96,15 @@ Future<void> showQueueModes(
     return;
   }
   try {
-    await session.choosePlaybackMode(selected);
+    await session.hub.chooseMode(selected);
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已请求切换模式，等待车机确认')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            session.hub.phoneTarget ? '本机播放模式已应用' : '已请求切换模式，等待车机确认',
+          ),
+        ),
+      );
     }
   } catch (e) {
     if (context.mounted) {
@@ -107,6 +122,22 @@ class QueueModeCaption extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: session,
     builder: (context, _) {
+      if (session.hub.phoneTarget) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              appliedPlaybackLabel(session),
+              style: const TextStyle(fontSize: 12, color: Colors.white60),
+            ),
+            TextButton(
+              key: const ValueKey('queue-mode-menu'),
+              onPressed: () => showQueueModes(context, session),
+              child: const Text('选择播放模式'),
+            ),
+          ],
+        );
+      }
       final actual = session.appliedQueueMode,
           requested = session.playback['requested_mode'];
       return Column(
@@ -159,7 +190,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
   int generation = 0;
   late String identity;
   String get who =>
-      '${widget.session.api.baseUrl}\n${widget.session.api.token}\n${widget.session.api.deviceId}\n${widget.session.userProfile['role']}';
+      '${widget.session.api.baseUrl}\n${widget.session.api.token}\n${widget.session.api.deviceId}\n${widget.session.userProfile['role']}\n${widget.session.hub.target}\n${widget.session.hub.sessionId}';
   @override
   void initState() {
     super.initState();
@@ -218,11 +249,19 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
       }
     });
     try {
-      final page = await api.readMusicQueue(
-        queueId: reset ? null : first?.id,
-        version: reset ? null : first?.version,
-        offset: reset ? 0 : tracks.length,
-      );
+      final page = widget.session.hub.phoneTarget
+          ? await api.readLocalQueue(
+              sessionId: widget.session.hub.sessionId,
+              source: reset ? 'netease_favorite' : null,
+              queueId: reset ? null : first?.id,
+              version: reset ? null : first?.version,
+              offset: reset ? 0 : tracks.length,
+            )
+          : await api.readMusicQueue(
+              queueId: reset ? null : first?.id,
+              version: reset ? null : first?.version,
+              offset: reset ? 0 : tracks.length,
+            );
       if (!mounted || gen != generation || used != who) return;
       accumulator.add(page);
       first ??= page;
@@ -258,7 +297,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
       if (first?.source != 'netease_favorite') {
         throw ApiFailure('请先打开我喜欢的音乐，再选择歌曲播放');
       }
-      await widget.session.playFavoriteTrack(
+      await widget.session.hub.playFavorite(
         track,
         queueId: first!.id,
         queueVersion: first!.version,
@@ -311,10 +350,7 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
           ListTile(
             title: Text('${track['title'] ?? '曲名暂不可用'}'),
             subtitle: Text('${track['artist'] ?? ''}'),
-            onTap:
-                busy ||
-                    widget.session.commandPending ||
-                    widget.session.awaitingExecution
+            onTap: busy || !widget.session.hub.controlsReady
                 ? null
                 : () => select(track),
           ),

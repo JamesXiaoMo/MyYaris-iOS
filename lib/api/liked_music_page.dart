@@ -38,10 +38,16 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
     final who = model.identity;
     setState(() => selecting = true);
     try {
-      await widget.session.playFavoriteTrack(track);
+      await widget.session.hub.playFavorite(track);
       if (mounted && who == model.identity) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已发送播放请求，请到音乐页确认车机是否开始播放')),
+          SnackBar(
+            content: Text(
+              widget.session.hub.phoneTarget
+                  ? '本机已准备播放，请到音乐页查看'
+                  : '已发送播放请求，请到音乐页确认车机是否开始播放',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -183,10 +189,9 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                   unavailable ||
                   selecting ||
                   !model.allowed ||
-                  !widget.session.canControlVehicle ||
-                  widget.session.commandPending ||
-                  widget.session.awaitingExecution ||
-                  widget.session.preparingTrack;
+                  !widget.session.hub.controlsReady ||
+                  (!widget.session.hub.phoneTarget &&
+                      !widget.session.canControlVehicle);
               return Card(
                 child: ListTile(
                   leading: cover(track),

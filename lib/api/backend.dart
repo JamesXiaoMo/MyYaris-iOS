@@ -1,5 +1,8 @@
 import 'contracts.dart';
 import 'liked_music_store.dart';
+import 'local_audio.dart' show LocalAudioEngine;
+import 'local_player.dart' show LocalMedia;
+import 'playback_hub.dart';
 import 'music_queue_contract.dart';
 import 'user_auth.dart';
 import 'dart:async';
@@ -8,6 +11,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'package:http/http.dart' as http;
 
 const defaultBackend = String.fromEnvironment(
@@ -274,6 +278,93 @@ class BackendApi {
       },
     ),
     origin: validateBase(baseUrl),
+  );
+
+  /// Queue pages for the phone's own playback session (never the vehicle's queue).
+  Future<MusicQueuePage> readLocalQueue({
+    required String sessionId,
+    String? source,
+    String? queueId,
+    int? version,
+    int offset = 0,
+  }) async => MusicQueuePage.fromJson(
+    await call(
+      'GET',
+      '/api/v1/music/local/queue',
+      query: {
+        'session_id': sessionId,
+        'offset': '$offset',
+        'limit': '50',
+        'source': ?source,
+        'queue_id': ?queueId,
+        if (version != null) 'queue_version': '$version',
+      },
+    ),
+    origin: validateBase(baseUrl),
+  );
+
+  Future<Map<String, dynamic>> localHeartBatch({
+    required String sessionId,
+    required String requestId,
+    required int seedSongId,
+    required int batchIndex,
+    String? queueId,
+    int? queueVersion,
+  }) => call(
+    'POST',
+    '/api/v1/music/local/intelligence',
+    body: {
+      'session_id': sessionId,
+      'request_id': requestId,
+      'seed_song_id': seedSongId,
+      'batch_index': batchIndex,
+      'count': 30,
+      'queue_id': ?queueId,
+      'queue_version': ?queueVersion,
+    },
+  );
+
+  /// Copies one immutable queue snapshot between the phone scope and the car scope (`adopt`: car to
+  /// phone, `export`: phone to car). The car's active queue is never changed by either.
+  Future<Map<String, dynamic>> transferQueue(
+    String direction, {
+    required String sessionId,
+    required String queueId,
+    required int queueVersion,
+  }) => call(
+    'POST',
+    '/api/v1/music/local/queue/$direction',
+    body: {
+      'session_id': sessionId,
+      'queue_id': queueId,
+      'queue_version': queueVersion,
+      'device_id': deviceId,
+    },
+  );
+
+  Future<void> closeLocalSession(String sessionId) async {
+    await call(
+      'POST',
+      '/api/v1/music/local/session/close',
+      body: {'session_id': sessionId},
+    );
+  }
+
+  /// Trusted media request for the phone engine: this backend's own HTTPS stream path, built from the
+  /// song id. A URL supplied by the server or a CDN is never used.
+  LocalMedia localMedia(Map<String, dynamic> track) {
+    if (!configured) throw ApiFailure('请先登录 MyYaris');
+    final url = Uri.parse(canonicalStream({...track, 'source': 'netease'}));
+    final origin = validateBase(baseUrl);
+    if (url.scheme != 'https' || url.origin != origin.origin) {
+      throw ApiFailure('媒体地址不受信任，未播放');
+    }
+    return LocalMedia(url, {'Authorization': 'Bearer $token'});
+  }
+
+  Future<Map<String, dynamic>> commandResult(String commandId) => call(
+    'GET',
+    '/api/v1/music/control/command/${Uri.encodeComponent(commandId)}',
   );
 
   Future<Map<String, dynamic>> resolveDestination(
@@ -582,6 +673,7 @@ class BackendSession extends ChangeNotifier {
     CredentialStore? navigationStore,
     this.requireUserLogin = true,
     this.webSocketConnector,
+    this.localEngine,
   }) : api = api ?? BackendApi(),
        store = store ?? KeychainStore(),
        authStore = authStore ?? ScopedKeychainStore('UserSession'),
@@ -606,6 +698,16 @@ class BackendSession extends ChangeNotifier {
   final bool requireUserLogin;
   final Future<WebSocket> Function(Uri, Map<String, String>)?
   webSocketConnector;
+
+  /// Injected phone audio engine (tests); production uses the native AVPlayer bridge.
+  final LocalAudioEngine? localEngine;
+  PlaybackHub? _hub;
+
+  /// Chooses the one audible output (this phone or the car) and runs the phone's own player.
+  PlaybackHub get hub =>
+      _hub ??= PlaybackHub(this, engine: localEngine, backgroundAudio: true)
+        ..addListener(publish);
+  void lifecycle(AppLifecycleState state) => _hub?.onLifecycle(state);
   final CredentialStore authStore, settingsStore, navigationStore;
   bool authInitialized = false,
       restoringSession = false,
@@ -779,6 +881,8 @@ class BackendSession extends ChangeNotifier {
   void resetAccountCaches() {
     // Private favorite metadata never outlives logout, session loss or an origin switch.
     unawaited(LikedMusicStore.shared.purgeAll());
+    // Phone-side audio and queues belong to the account/device that started them.
+    _hub?.reset();
     commandPending = false;
     preparingTrack = false;
     deviceDenied = false;
@@ -806,6 +910,7 @@ class BackendSession extends ChangeNotifier {
     final usedToken = api.token;
     final profile = accountProfile(await api.call('GET', '/api/v1/auth/me'));
     if (api.token != usedToken || disposed) return;
+    if (userProfile['role'] != profile['role']) _hub?.reset();
     userProfile = profile;
     if (resetDeviceDenied) deviceDenied = false;
     publish();
@@ -820,14 +925,14 @@ class BackendSession extends ChangeNotifier {
     await settingsStore.save(
       jsonEncode({'base': origin, 'device': device.trim()}),
     );
+    if (api.baseUrl != origin || api.deviceId != device.trim()) {
+      stop();
+      resetAccountCaches();
+    }
     if (api.baseUrl != origin) {
       api.token = '';
       api.isUserSession = false;
       authenticated = false;
-    }
-    if (api.deviceId != device.trim()) {
-      stop();
-      resetAccountCaches();
     }
     api.baseUrl = origin;
     api.deviceId = device.trim();
@@ -935,6 +1040,7 @@ class BackendSession extends ChangeNotifier {
     sessionExpiryTimer?.cancel();
     publish();
     var revoked = true, localCleared = true;
+    await _hub?.closeRemoteSession();
     try {
       if (api.isUserSession && api.configured) {
         await api.call('POST', '/api/v1/auth/logout');
@@ -989,6 +1095,7 @@ class BackendSession extends ChangeNotifier {
     );
     if (disposed) return;
     stop();
+    _hub?.reset();
     api.baseUrl = u.origin;
     api.token = token.trim();
     api.deviceId = device.trim();
@@ -1020,6 +1127,7 @@ class BackendSession extends ChangeNotifier {
     }
     await store.clear();
     stop();
+    _hub?.reset();
     api.token = '';
     knownTracks.clear();
     issuedCommands.clear();
@@ -1300,20 +1408,20 @@ class BackendSession extends ChangeNotifier {
   String get homeDestinationDetail => lastTask.isEmpty
       ? '尚无本机确认的导航任务'
       : _nonempty(lastTask['address']) ?? '上次确认发送的目的地';
-  String get homeMusicTitle =>
+  String get carMusicTitle =>
       _nonempty(currentTrack['title']) ??
       (playback['current_track_id'] == null ||
               playback['current_track_id'] == ''
           ? '暂无曲目'
           : '曲名暂不可用');
-  String get homeMusicDetail => [
+  String get carMusicDetail => [
     if (_nonempty(currentTrack['artist']) != null)
       _nonempty(currentTrack['artist'])!,
     if (playback['position_ms'] is num) _clock(playback['position_ms']),
     if (playback['duration_ms'] is num && (playback['duration_ms'] as num) > 0)
       '/ ${_clock(playback['duration_ms'])}',
   ].join(' ').trim();
-  String get homeMusicState => !heartbeatFresh || playbackStale
+  String get carMusicState => !heartbeatFresh || playbackStale
       ? '状态待更新'
       : switch (playback['playback_state']) {
           'playing' => '正在播放',
@@ -1322,6 +1430,24 @@ class BackendSession extends ChangeNotifier {
           'buffering' => '缓冲中',
           _ => '状态未知',
         };
+
+  /// Home card text for the selected output (phone or car), never a mix of both.
+  String get homeMusicTitle =>
+      _hub?.phoneTarget == true ? _hub!.view.title : carMusicTitle;
+  String get homeMusicDetail {
+    final h = _hub;
+    if (h == null || !h.phoneTarget) return carMusicDetail;
+    final v = h.view;
+    return [
+      if (v.artist.isNotEmpty) v.artist,
+      if (v.positionMs != null) _clock(v.positionMs),
+      if (v.durationMs != null) '/ ${_clock(v.durationMs)}',
+    ].join(' ').trim();
+  }
+
+  String get homeMusicState => _hub?.phoneTarget == true
+      ? '本机 · ${_hub!.view.stateLabel}'
+      : carMusicState;
   static String? _nonempty(Object? value) =>
       value is String && value.trim().isNotEmpty ? value.trim() : null;
   static String _clock(dynamic value) {
@@ -1957,7 +2083,9 @@ class BackendSession extends ChangeNotifier {
         DateTime.now().toUtc().difference(stamp.toUtc()).inSeconds.abs() > 60;
   }
 
-  bool get playing => playback['playback_state'] == 'playing';
+  bool get playing => _hub?.phoneTarget == true
+      ? _hub!.local.isPlaying
+      : playback['playback_state'] == 'playing';
   String get taskLabel => switch (lastTask['status']) {
     'queued' => '已排队',
     'received' => '车机已接收',
@@ -1978,6 +2106,7 @@ class BackendSession extends ChangeNotifier {
     disposed = true;
     sessionExpiryTimer?.cancel();
     stop();
+    _hub?.dispose();
     api.close();
     super.dispose();
   }

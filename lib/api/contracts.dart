@@ -52,6 +52,7 @@ class MusicContract {
           'netease',
           'single_track',
           'netease_favorite',
+          'netease_intelligence',
         }.contains(source)) {
           throw ApiFailure('曲目来源无效');
         }
@@ -63,7 +64,18 @@ class MusicContract {
                     input['expected_queue_version'] < 0))) {
           throw ApiFailure('播放列表信息无效，请刷新后重试');
         }
-        if (source == 'netease_favorite' &&
+        final seek = input['seek_ms'];
+        if (seek != null && (seek is! int || seek < 0)) {
+          throw ApiFailure('播放进度必须是非负毫秒整数');
+        }
+        if (input['autoplay'] != null && input['autoplay'] is! bool) {
+          throw ApiFailure('播放参数无效');
+        }
+        if (input['mode'] != null &&
+            !{'list_loop', 'shuffle', 'single_loop'}.contains(input['mode'])) {
+          throw ApiFailure('未知播放模式');
+        }
+        if ({'netease_favorite', 'netease_intelligence'}.contains(source) &&
             (input['queue_id'] is! String ||
                 (input['queue_id'] as String).isEmpty ||
                 input['queue_version'] is! int ||
@@ -77,7 +89,13 @@ class MusicContract {
           'track_id': id,
           'stream_url': url.toString(),
           'source': source,
-          if (source == 'netease_favorite') ...{
+          'seek_ms': ?seek,
+          if (input['autoplay'] is bool) 'autoplay': input['autoplay'],
+          if (input['mode'] is String) 'mode': input['mode'],
+          if ({
+            'netease_favorite',
+            'netease_intelligence',
+          }.contains(source)) ...{
             'queue_id': input['queue_id'],
             'queue_version': input['queue_version'],
             if (input['queue_index'] != null)
@@ -151,6 +169,18 @@ class MusicContract {
           }
         }
         return result;
+      case 'resume':
+        final resumeSeek = input['seek_ms'];
+        if (resumeSeek != null && (resumeSeek is! int || resumeSeek < 0)) {
+          throw ApiFailure('播放进度必须是非负毫秒整数');
+        }
+        return {
+          'seek_ms': ?resumeSeek,
+          if (input['expected_queue_id'] is String)
+            'expected_queue_id': input['expected_queue_id'],
+          if (input['expected_queue_version'] is int)
+            'expected_queue_version': input['expected_queue_version'],
+        };
       case 'set_loop':
         return {'loop_mode': loop(input['loop_mode'] ?? input['mode'])};
       case 'set_shuffle':

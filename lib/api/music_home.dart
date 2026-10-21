@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'backend.dart';
 import 'music_queue_browser.dart';
 import 'netease_account_view.dart';
+import 'playback_target.dart';
 import 'liked_music_page.dart';
 import 'pages.dart' show MusicSearchPage, PlaybackPanel, AccountPage;
 
@@ -329,9 +330,8 @@ class _VinylRecordState extends State<VinylRecord>
       widget.active &&
       foreground &&
       widget.session.foreground &&
-      widget.session.playing &&
-      widget.session.heartbeatFresh &&
-      !widget.session.playbackStale &&
+      widget.session.hub.view.playing &&
+      widget.session.hub.view.known &&
       !MediaQuery.disableAnimationsOf(context) &&
       TickerMode.valuesOf(context).enabled;
   void sync() {
@@ -383,8 +383,7 @@ class _VinylRecordState extends State<VinylRecord>
 
   @override
   Widget build(BuildContext context) {
-    final known =
-        widget.session.heartbeatFresh && !widget.session.playbackStale;
+    final known = widget.session.hub.view.known;
     final state = known ? (widget.session.playing ? '播放中' : '未在播放') : '播放状态未知';
     return Semantics(
       button: widget.onTap != null,
@@ -407,7 +406,7 @@ class _VinylRecordState extends State<VinylRecord>
                 child: Center(
                   child: ClipOval(
                     child: MusicArtwork(
-                      url: widget.session.currentTrack['cover_url'],
+                      url: widget.session.hub.view.coverUrl,
                       key: const ValueKey('vinyl-cover'),
                       size: widget.size * .64,
                     ),
@@ -497,7 +496,8 @@ class MusicPlayerPage extends StatelessWidget {
 
   Future<void> lyrics(BuildContext context, String songId) async {
     final identity = '${session.api.baseUrl}\n${session.api.token}';
-    final track = session.playback['current_track_id'];
+    final track = session.hub.view.trackId;
+    final output = session.hub.target;
     final future = session.api
         .call('GET', '/api/v1/music/netease/lyric', query: {'song_id': songId})
         .then<Map<String, dynamic>>(
@@ -526,7 +526,8 @@ class MusicPlayerPage extends StatelessWidget {
                   builder: (context, snapshot) {
                     if (identity !=
                             '${session.api.baseUrl}\n${session.api.token}' ||
-                        track != session.playback['current_track_id']) {
+                        track != session.hub.view.trackId ||
+                        output != session.hub.target) {
                       return const Center(child: Text('会话或曲目已切换，请关闭后重新打开'));
                     }
                     if (snapshot.connectionState != ConnectionState.done) {
@@ -575,12 +576,8 @@ class MusicPlayerPage extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: session,
     builder: (context, _) {
-      final artwork = musicArtworkUrl(session.currentTrack['cover_url']);
-      final songId =
-          session.currentTrack['song_id'] ??
-          (session.currentTrack['source'] == 'netease'
-              ? session.currentTrack['id']
-              : null);
+      final artwork = musicArtworkUrl(session.hub.view.coverUrl);
+      final songId = session.hub.view.songId;
       return Scaffold(
         backgroundColor: const Color(0xFF0B111E),
         body: Stack(
@@ -708,6 +705,8 @@ class MusicPlayerPage extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 16),
+                        PlaybackTargetPicker(session: session),
+                        const SizedBox(height: 12),
                         SizedBox(
                           width: size,
                           height: size + 18,

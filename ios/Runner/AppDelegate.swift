@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreLocation
 import MapKit
 import WebKit
@@ -9,6 +10,7 @@ import UniformTypeIdentifiers
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDocumentPickerDelegate {
   private var audioPickerResult: FlutterResult?
+  private var localAudio: YarisLocalAudio?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -22,6 +24,7 @@ import UniformTypeIdentifiers
     // Preserve complete native touch sequences. The default eager blocker can
     // strand embedded MapKit gestures after a Flutter overlay is touched.
     engineBridge.applicationRegistrar.register(YarisMapFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/map", gestureRecognizersBlockingPolicy: FlutterPlatformViewGestureRecognizersBlockingPolicyWaitUntilTouchesEnded)
+    localAudio = YarisLocalAudio(messenger: engineBridge.applicationRegistrar.messenger())
     let channel = FlutterMethodChannel(name: "io.myyaris/credentials", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { call, result in
       let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -471,5 +474,205 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     map.showsUserLocation = false; locator.delegate = nil
     channel.setMethodCallHandler(nil); map.delegate = nil; map.removeAnnotations(map.annotations)
     map.removeFromSuperview()
+  }
+}
+
+
+/// iPhone-local playback of the authenticated backend stream. A thin AVPlayer / AVAudioSession bridge:
+/// it never decides what plays next and never starts by itself. Every load is tagged with an epoch so
+/// Flutter can drop late events from a previous item.
+private final class YarisLocalAudio: NSObject {
+  private let channel: FlutterMethodChannel
+  private var player: AVPlayer?
+  private var item: AVPlayerItem?
+  private var epoch = -1
+  private var timeObserver: Any?
+  private var statusObservation: NSKeyValueObservation?
+  private var controlObservation: NSKeyValueObservation?
+  private var loadReply: FlutterResult?
+  private var loadTimeout: DispatchWorkItem?
+  private var pendingPosition = 0
+  private var pendingAutoplay = false
+  private var observers: [NSObjectProtocol] = []
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "io.myyaris/local_audio", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in self?.handle(call, result) }
+    let center = NotificationCenter.default
+    observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+      guard let self = self, let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+      if kind == .began {
+        self.pendingAutoplay = false
+        self.player?.pause()
+        self.emit(["type": "interruption", "phase": "began"])
+      } else {
+        let flags = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0
+        let resume = AVAudioSession.InterruptionOptions(rawValue: flags).contains(.shouldResume)
+        self.emit(["type": "interruption", "phase": "ended", "shouldResume": resume])
+      }
+    })
+    observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+      guard let self = self, let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable else { return }
+      self.pendingAutoplay = false
+      self.player?.pause()
+      self.emit(["type": "routeLost"])
+    })
+  }
+
+  private func emit(_ payload: [String: Any]) {
+    var body = payload
+    if body["epoch"] == nil { body["epoch"] = epoch }
+    channel.invokeMethod("event", arguments: body)
+  }
+
+  private func positionMs() -> Int {
+    guard let time = player?.currentTime(), time.isNumeric else { return 0 }
+    return max(0, Int((time.seconds * 1000).rounded()))
+  }
+
+  private func durationMs() -> Int {
+    guard let time = item?.duration, time.isNumeric, time.seconds.isFinite else { return 0 }
+    return max(0, Int((time.seconds * 1000).rounded()))
+  }
+
+  private func release(deactivate: Bool) {
+    loadTimeout?.cancel(); loadTimeout = nil
+    if let reply = loadReply { loadReply = nil; reply(FlutterError(code: "LOAD_CANCELLED", message: "已取消", details: nil)) }
+    statusObservation?.invalidate(); statusObservation = nil
+    controlObservation?.invalidate(); controlObservation = nil
+    if let observer = timeObserver { player?.removeTimeObserver(observer); timeObserver = nil }
+    NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: item)
+    NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: item)
+    player?.pause()
+    player?.replaceCurrentItem(with: nil)
+    player = nil; item = nil
+    if deactivate {
+      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+  }
+
+  private func activateSession() throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(.playback, mode: .default, options: [])
+    try session.setActive(true)
+  }
+
+  private func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    let args = call.arguments as? [String: Any] ?? [:]
+    switch call.method {
+    case "load":
+      guard let id = args["epoch"] as? Int, let raw = args["url"] as? String, let url = URL(string: raw),
+            url.scheme == "https", url.host != nil, url.user == nil else {
+        result(FlutterError(code: "INSECURE_URL", message: "媒体地址不受信任", details: nil)); return
+      }
+      release(deactivate: false)
+      epoch = id
+      pendingPosition = max(0, args["positionMs"] as? Int ?? 0)
+      pendingAutoplay = args["autoplay"] as? Bool ?? false
+      let headers = (args["headers"] as? [String: String]) ?? [:]
+      let asset = AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+      let newItem = AVPlayerItem(asset: asset)
+      let newPlayer = AVPlayer(playerItem: newItem)
+      newPlayer.automaticallyWaitsToMinimizeStalling = true
+      newPlayer.volume = Float(min(1, max(0, args["volume"] as? Double ?? 1)))
+      item = newItem; player = newPlayer; loadReply = result
+      let loadEpoch = id
+      statusObservation = newItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+        DispatchQueue.main.async { self?.itemStatusChanged(item, loadEpoch) }
+      }
+      controlObservation = newPlayer.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+        DispatchQueue.main.async {
+          guard let self = self, self.epoch == loadEpoch, self.loadReply == nil else { return }
+          let state = player.timeControlStatus == .playing ? "playing" : player.timeControlStatus == .paused ? "paused" : "buffering"
+          self.emit(["type": "state", "state": state, "positionMs": self.positionMs(), "durationMs": self.durationMs()])
+        }
+      }
+      timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
+        guard let self = self, self.epoch == loadEpoch, self.loadReply == nil else { return }
+        self.emit(["type": "position", "positionMs": self.positionMs(), "durationMs": self.durationMs()])
+      }
+      NotificationCenter.default.addObserver(self, selector: #selector(itemEnded(_:)), name: .AVPlayerItemDidPlayToEndTime, object: newItem)
+      NotificationCenter.default.addObserver(self, selector: #selector(itemFailed(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: newItem)
+      let timeout = DispatchWorkItem { [weak self] in
+        guard let self = self, self.epoch == loadEpoch, let reply = self.loadReply else { return }
+        self.loadReply = nil
+        self.release(deactivate: false)
+        reply(FlutterError(code: "LOAD_TIMEOUT", message: "媒体准备超时", details: nil))
+      }
+      loadTimeout = timeout
+      DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timeout)
+    case "play":
+      guard let player = player, args["epoch"] as? Int == epoch, loadReply == nil else { result(FlutterError(code: "NOT_LOADED", message: "没有已准备的媒体", details: nil)); return }
+      do { try activateSession() } catch { result(FlutterError(code: "AUDIO_SESSION", message: "无法启用音频会话", details: nil)); return }
+      player.play(); result(nil)
+    case "pause":
+      guard args["epoch"] as? Int == epoch else { result(nil); return }
+      player?.pause(); result(nil)
+    case "seek":
+      guard let player = player, args["epoch"] as? Int == epoch, let ms = args["positionMs"] as? Int else { result(FlutterError(code: "NOT_LOADED", message: "没有已准备的媒体", details: nil)); return }
+      player.seek(to: CMTime(seconds: Double(max(0, ms)) / 1000, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { done in
+        DispatchQueue.main.async { result(done ? nil : FlutterError(code: "SEEK_CANCELLED", message: "跳转被取消", details: nil)) }
+      }
+    case "volume":
+      player?.volume = Float(min(1, max(0, args["volume"] as? Double ?? 1))); result(nil)
+    case "stop":
+      release(deactivate: true); epoch = -1; result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func itemStatusChanged(_ item: AVPlayerItem, _ loadEpoch: Int) {
+    guard epoch == loadEpoch, self.item === item else { return }
+    guard let reply = loadReply else {
+      if item.status == .failed {
+        player?.pause()
+        emit(["type": "error", "code": "PLAYBACK_FAILED", "message": "播放中断"])
+      }
+      return
+    }
+    switch item.status {
+    case .readyToPlay:
+      let finish: () -> Void = { [weak self] in
+        guard let self = self, self.epoch == loadEpoch, let reply = self.loadReply else { return }
+        self.loadReply = nil; self.loadTimeout?.cancel(); self.loadTimeout = nil
+        if self.pendingAutoplay {
+          do { try self.activateSession() } catch {
+            self.release(deactivate: false)
+            reply(FlutterError(code: "AUDIO_SESSION", message: "无法启用音频会话", details: nil)); return
+          }
+          self.player?.play()
+        }
+        reply(["durationMs": self.durationMs(), "positionMs": self.positionMs(), "state": self.player?.timeControlStatus == .playing ? "playing" : self.pendingAutoplay ? "buffering" : "paused"])
+      }
+      if pendingPosition > 0 {
+        player?.seek(to: CMTime(seconds: Double(pendingPosition) / 1000, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+          DispatchQueue.main.async(execute: finish)
+        }
+      } else { finish() }
+    case .failed:
+      loadReply = nil; loadTimeout?.cancel(); loadTimeout = nil
+      release(deactivate: false)
+      reply(FlutterError(code: "LOAD_FAILED", message: "媒体无法播放", details: nil))
+    default: break
+    }
+  }
+
+  deinit {
+    release(deactivate: true)
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+  }
+
+  @objc private func itemEnded(_ note: Notification) {
+    guard (note.object as AnyObject?) === item else { return }
+    emit(["type": "completed", "positionMs": positionMs(), "durationMs": durationMs()])
+  }
+
+  @objc private func itemFailed(_ note: Notification) {
+    guard (note.object as AnyObject?) === item else { return }
+    emit(["type": "error", "code": "PLAYBACK_FAILED", "message": "播放中断"])
   }
 }

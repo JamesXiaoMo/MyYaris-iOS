@@ -48,6 +48,11 @@ class NeteaseAccountView extends ChangeNotifier {
       );
       if (disposed || gen != epoch || who != identity) return;
       if (value['logged_in'] is! bool) throw ApiFailure('网易云账号状态格式不符');
+      if (loaded &&
+          (profile['user_id'] != value['user_id'] ||
+              profile['logged_in'] != value['logged_in'])) {
+        session.hub.reset();
+      }
       profile = {
         'logged_in': value['logged_in'],
         if (manager) ...{

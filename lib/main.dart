@@ -110,6 +110,7 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    session.lifecycle(state);
     session.setForeground(state == AppLifecycleState.resumed);
   }
 
@@ -125,11 +126,13 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
     Map<String, dynamic> params = const {},
   ]) async {
     try {
-      await session.sendCommand(action, params);
+      await session.hub.command(action, params);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('指令已提交，等待车机回报')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(session.hub.phoneTarget ? '本机控制已应用' : '指令已提交，等待车机回报'),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -181,7 +184,9 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                   _HomePage(
                     session: session,
                     playing: session.playing,
-                    repeat: session.playback['loop_mode'] == 'all',
+                    repeat: session.hub.phoneTarget
+                        ? session.hub.local.queue?.mode == 'list_loop'
+                        : session.playback['loop_mode'] == 'all',
                     onPlay: () =>
                         _command(session.playing ? 'pause' : 'resume'),
                     onRepeat: () => showQueueModes(context, session),
