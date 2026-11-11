@@ -15,7 +15,9 @@ import 'package:flutter/services.dart';
 const _background = Color(0xFF090B10);
 const _muted = Color(0xFF9398A6);
 const _blue = Color(0xFF44C5FF);
-const _purple = Color(0xFFC77DFF);
+const _homeAccent = Color(0xFF91D8D0);
+const _homeSurface = Color(0xFF131C21);
+const _homeBorder = Color(0xFF273438);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -164,14 +166,13 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                     end: Alignment.bottomCenter,
                     colors: _index == 0
                         ? const [
-                            Color(0xFF08132F),
-                            Color(0xFF252439),
-                            Color(0xFFCE9877),
-                            Color(0xFF333640),
+                            Color(0xFF101A20),
+                            Color(0xFF183039),
+                            Color(0xFF10191E),
                             _background,
                           ]
                         : const [Color(0xFF08132F), _background],
-                    stops: _index == 0 ? const [0, .35, .58, .68, 1] : null,
+                    stops: _index == 0 ? const [0, .37, .72, 1] : null,
                   ),
                 ),
               ),
@@ -184,14 +185,12 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                   _HomePage(
                     session: session,
                     playing: session.playing,
-                    repeat: session.hub.phoneTarget
-                        ? session.hub.local.queue?.mode == 'list_loop'
-                        : session.playback['loop_mode'] == 'all',
                     onPlay: () =>
                         _command(session.playing ? 'pause' : 'resume'),
                     onRepeat: () => showQueueModes(context, session),
-                    onDemo: (label) =>
-                        _command(label == '上一曲' ? 'prev' : 'next'),
+                    onPrevious: () => _command('prev'),
+                    onNext: () => _command('next'),
+                    onDriving: () => setState(() => _index = 1),
                   ),
                   NavigationPage(session: session, active: _index == 1),
                   MusicPage(session: session, active: _index == 2),
@@ -219,225 +218,256 @@ class _HomePage extends StatelessWidget {
   const _HomePage({
     required this.session,
     required this.playing,
-    required this.repeat,
     required this.onPlay,
     required this.onRepeat,
-    required this.onDemo,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onDriving,
   });
+
   final BackendSession session;
-  final bool playing, repeat;
-  final VoidCallback onPlay, onRepeat;
-  final ValueChanged<String> onDemo;
+  final bool playing;
+  final VoidCallback onPlay, onRepeat, onPrevious, onNext, onDriving;
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    key: const ValueKey('home-scroll'),
-    padding: EdgeInsets.fromLTRB(
-      20,
-      12,
-      20,
-      24 + MediaQuery.paddingOf(context).bottom,
+  Widget build(BuildContext context) {
+    final connectionColor = switch (session.homeConnectionState) {
+      HomeConnectionState.backendOffline => const Color(0xFFFF6370),
+      HomeConnectionState.carOffline => const Color(0xFFFFCC66),
+      HomeConnectionState.online => const Color(0xFF48D882),
+      HomeConnectionState.checking => _muted,
+    };
+    return SingleChildScrollView(
+      key: const ValueKey('home-scroll'),
+      padding: EdgeInsets.fromLTRB(
+        22,
+        16,
+        22,
+        24 + MediaQuery.paddingOf(context).bottom,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text(
+                'MyYaris',
+                style: TextStyle(
+                  color: _homeAccent,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .45,
+                ),
+              ),
+              _badge(
+                session.homeConnectionLabel,
+                connectionColor,
+                icon: Icons.circle,
+                iconSize: 6,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Toyota Yaris',
+            style: TextStyle(
+              fontSize: 39,
+              height: 1.08,
+              letterSpacing: -1.6,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, constraints) => SizedBox(
+              height: (constraints.maxWidth * .72)
+                  .clamp(192.0, 278.0)
+                  .toDouble(),
+              child: const CarModel(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _musicCard(),
+          const SizedBox(height: 12),
+          _destinationCard(),
+        ],
+      ),
+    );
+  }
+
+  BoxDecoration get _card => BoxDecoration(
+    color: _homeSurface,
+    borderRadius: BorderRadius.circular(24),
+    border: Border.all(color: _homeBorder),
+  );
+
+  Widget _musicCard() => DecoratedBox(
+    decoration: _card,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _sectionIcon(CupertinoIcons.music_note),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.homeMusicState,
+                      style: const TextStyle(
+                        color: _homeAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      session.homeMusicTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (session.homeMusicDetail.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        session.homeMusicDetail,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: _muted),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: _homeBorder),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _control('上一曲', CupertinoIcons.backward_end_fill, onPrevious),
+              _control(
+                '播放/暂停',
+                playing ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
+                onPlay,
+                primary: true,
+              ),
+              _control('下一曲', CupertinoIcons.forward_end_fill, onNext),
+              _control(
+                appliedPlaybackLabel(session),
+                switch (session.appliedQueueMode) {
+                  'shuffle' => CupertinoIcons.shuffle,
+                  'intelligence' => CupertinoIcons.heart,
+                  'single_loop' => CupertinoIcons.repeat_1,
+                  _ => CupertinoIcons.repeat,
+                },
+                onRepeat,
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 18,
-          runSpacing: 10,
+  );
+
+  Widget _destinationCard() => Material(
+    color: _homeSurface,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(24),
+      side: const BorderSide(color: _homeBorder),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onDriving,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
           children: [
-            const Text(
-              'Toyota Yaris',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            _sectionIcon(CupertinoIcons.location_north_fill),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '目的地',
+                    style: TextStyle(
+                      color: _homeAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    session.homeDestinationTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    session.lastTask.isNotEmpty && !session.navigationVerified
+                        ? '状态待核对 · ${session.homeDestinationDetail}'
+                        : session.lastTask.isEmpty
+                        ? session.homeDestinationDetail
+                        : '${session.taskLabel} · ${session.homeDestinationDetail}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: _muted),
+                  ),
+                ],
+              ),
             ),
-            _badge(
-              session.homeConnectionLabel,
-              switch (session.homeConnectionState) {
-                HomeConnectionState.backendOffline => const Color(0xFFFF6370),
-                HomeConnectionState.carOffline => const Color(0xFFFFCC66),
-                HomeConnectionState.online => const Color(0xFF48D882),
-                HomeConnectionState.checking => _muted,
-              },
-              icon: Icons.circle,
-              iconSize: 8,
-            ),
+            const SizedBox(width: 8),
+            const Icon(CupertinoIcons.chevron_right, size: 15, color: _muted),
           ],
         ),
-        const SizedBox(height: 20),
-        const SizedBox(height: 280, child: CarModel()),
-        const SizedBox(height: 30),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _control(
-              '上一曲',
-              CupertinoIcons.backward_end_fill,
-              () => onDemo('上一曲'),
-            ),
-            _control(
-              '播放/暂停',
-              playing ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
-              onPlay,
-              highlighted: true,
-            ),
-            _control(
-              '下一曲',
-              CupertinoIcons.forward_end_fill,
-              () => onDemo('下一曲'),
-            ),
-            _control(
-              appliedPlaybackLabel(session),
-              session.appliedQueueMode == 'shuffle'
-                  ? CupertinoIcons.shuffle
-                  : session.appliedQueueMode == 'intelligence'
-                  ? CupertinoIcons.heart
-                  : session.appliedQueueMode == 'single_loop'
-                  ? CupertinoIcons.repeat_1
-                  : CupertinoIcons.repeat,
-              onRepeat,
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final stackCards =
-                constraints.maxWidth < 340 ||
-                MediaQuery.textScalerOf(context).scale(14) > 19;
-            final cards = [
-              _featureCard(context, navigation: true),
-              _featureCard(context, navigation: false),
-            ];
-            if (stackCards) {
-              return Column(
-                children: [cards[0], const SizedBox(height: 12), cards[1]],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: cards[0]),
-                const SizedBox(width: 12),
-                Expanded(child: cards[1]),
-              ],
-            );
-          },
-        ),
-      ],
+      ),
     ),
+  );
+
+  Widget _sectionIcon(IconData icon) => Container(
+    width: 44,
+    height: 44,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: const Color(0xFF203136),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Icon(icon, size: 19, color: _homeAccent),
   );
 
   Widget _control(
     String label,
     IconData icon,
     VoidCallback callback, {
-    bool highlighted = false,
-  }) => Expanded(
-    child: Column(
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: highlighted
-                  ? const [Color(0xFF4A4E58), Color(0xFF2C3038)]
-                  : const [Color(0xFF333740), Color(0xFF242830)],
-            ),
-            border: Border.all(color: const Color(0xFF4A4E56)),
-          ),
-          child: IconButton(
-            onPressed: callback,
-            tooltip: label,
-            icon: Icon(icon, size: 23),
-            padding: const EdgeInsets.all(15),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: _muted, fontSize: 11),
-        ),
-      ],
+    bool primary = false,
+  }) => IconButton(
+    onPressed: callback,
+    tooltip: label,
+    icon: Icon(icon, size: primary ? 21 : 19),
+    style: IconButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      foregroundColor: primary ? const Color(0xFF0C2725) : Colors.white,
+      backgroundColor: primary ? _homeAccent : Colors.transparent,
     ),
   );
-
-  Widget _featureCard(BuildContext context, {required bool navigation}) {
-    final color = navigation ? _blue : _purple;
-    return _panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  navigation
-                      ? CupertinoIcons.location_north_fill
-                      : CupertinoIcons.music_note,
-                  color: color,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  navigation ? 'CAR NAVITIME' : '车机播放器',
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 10, color: _muted),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            navigation ? session.homeDestinationTitle : session.homeMusicTitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            navigation
-                ? session.homeDestinationDetail
-                : session.homeMusicDetail.isEmpty
-                ? '车机上报曲目'
-                : session.homeMusicDetail,
-            style: const TextStyle(color: _muted, fontSize: 11),
-          ),
-          const SizedBox(height: 9),
-          _badge(
-            navigation
-                ? session.lastTask.isNotEmpty && !session.navigationVerified
-                      ? '状态待核对'
-                      : session.taskLabel
-                : session.homeMusicState,
-            color,
-            icon: navigation ? Icons.circle : CupertinoIcons.music_note,
-            iconSize: 9,
-          ),
-        ],
-      ),
-    );
-  }
 }
-
-Widget _panel({required Widget child}) => Container(
-  width: double.infinity,
-  padding: const EdgeInsets.all(14),
-  decoration: BoxDecoration(
-    color: const Color(0xFF10141C),
-    borderRadius: BorderRadius.circular(20),
-    border: Border.all(color: const Color(0xFF222630)),
-  ),
-  child: child,
-);
 
 Widget _badge(
   String label,

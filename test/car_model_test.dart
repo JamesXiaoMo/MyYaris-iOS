@@ -59,8 +59,8 @@ void main() {
       expect(name, isNotNull);
       expect(
         find.byType(Image),
-        findsNothing,
-      ); // No static poster while loading.
+        findsOneWidget,
+      ); // The matching model still fills the stage while loading.
       final done = Completer<void>();
       messenger.handlePlatformMessage(
         name!,

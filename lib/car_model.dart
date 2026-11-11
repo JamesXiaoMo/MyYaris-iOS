@@ -45,7 +45,9 @@ class _CarModelState extends State<CarModel> {
   Widget build(BuildContext context) {
     final supported = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
     return Semantics(
-      label: _failed
+      label: !supported
+          ? 'Toyota Yaris 车模预览'
+          : _failed
           ? '本地3D模型加载失败'
           : !_ready
           ? '本地3D模型加载中'
@@ -85,18 +87,26 @@ class _CarModelState extends State<CarModel> {
                   ),
                 ),
               if (!_ready || _failed)
+                ExcludeSemantics(
+                  child: ClipRect(
+                    child: Transform.scale(
+                      scale: 1.22,
+                      alignment: const Alignment(0, .45),
+                      child: Image.asset(
+                        'assets/images/yaris-model-poster.png',
+                        fit: BoxFit.contain,
+                        excludeFromSemantics: true,
+                      ),
+                    ),
+                  ),
+                ),
+              if (supported && (!_ready || _failed))
                 Positioned(
                   bottom: 0,
                   left: 0,
                   right: 0,
                   child: Text(
-                    _failed
-                        ? '本地3D加载失败，请重新打开App'
-                        : !supported
-                        ? '3D 仅支持 iPhone'
-                        : !_ready
-                        ? '本地 3D 模型加载中…'
-                        : '',
+                    _failed ? '本地3D加载失败，请重新打开App' : '正在加载 3D 车模…',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 10, color: Colors.white54),
                   ),
