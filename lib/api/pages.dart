@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -11,7 +12,7 @@ import '../apple_map.dart';
 import '../map_search_page.dart';
 import 'driving_favorites_drawer.dart';
 
-const _muted = Color(0xFF9398A6);
+const _muted = YarisTheme.muted;
 
 Future<void> showApiResult(
   BuildContext context,
@@ -140,10 +141,10 @@ Future<bool> confirmAction(
 Widget card(List<Widget> children) => Padding(
   padding: const EdgeInsets.only(bottom: 16),
   child: Material(
-    color: const Color(0xFF11151D),
+    color: YarisTheme.paper,
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(20),
-      side: const BorderSide(color: Color(0xFF252B35)),
+      side: const BorderSide(color: YarisTheme.line),
     ),
     child: Padding(
       padding: const EdgeInsets.all(16),
@@ -571,20 +572,29 @@ class _NavigationPageState extends State<NavigationPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(22, 10, 22, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Expanded(
-                child: Text(
-                  '行驶',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                ),
+              const Text(
+                '行驶',
+                style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
               ),
-              IconButton(
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
                 key: const ValueKey('map-search-open'),
-                tooltip: '搜索地图地点',
                 onPressed: busy ? null : searchMap,
+                style: FilledButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  minimumSize: const Size(0, 46),
+                  backgroundColor: YarisTheme.neutral,
+                  foregroundColor: YarisTheme.ink,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
                 icon: const Icon(Icons.search),
+                label: const Text('搜索地图地点'),
               ),
             ],
           ),
@@ -616,12 +626,17 @@ class _NavigationPageState extends State<NavigationPage> {
                                     ) -
                                 24)
                             .clamp(0.0, constraints.maxHeight),
-                    child: AppleMap(
-                      controller: mapController,
-                      onInteractionChanged: mapInteractionChanged,
-                      active: widget.active,
-                      selection: mapSelection,
-                      onSelected: selectPoint,
+                    left: 16,
+                    right: 16,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(22),
+                      child: AppleMap(
+                        controller: mapController,
+                        onInteractionChanged: mapInteractionChanged,
+                        active: widget.active,
+                        selection: mapSelection,
+                        onSelected: selectPoint,
+                      ),
                     ),
                   ),
                   DraggableScrollableSheet(
@@ -1536,6 +1551,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ),
     children: [
       heading('设置', ''),
+      const _SettingsGroupLabel('账户与权限'),
       card([
         ListTile(
           key: const ValueKey('settings-user-open'),
@@ -1555,8 +1571,10 @@ class _SettingsPageState extends State<SettingsPage> {
           onTap: accountMenu,
         ),
       ]),
+      const _SettingsGroupLabel('车辆与连接'),
       card([
         ListTile(
+          leading: const Icon(Icons.link, color: YarisTheme.blue),
           key: const ValueKey('settings-connection-open'),
           title: const Text('连接设置'),
           trailing: const Icon(Icons.chevron_right),
@@ -1567,7 +1585,11 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
         ),
+      ]),
+      const _SettingsGroupLabel('音乐与存储'),
+      card([
         ListTile(
+          leading: const Icon(Icons.music_note, color: YarisTheme.blue),
           title: const Text('网易云账号'),
           subtitle: const Text('扫码登录 / 凭据导入 / 保持登录 / 退出'),
           trailing: const Icon(Icons.chevron_right),
@@ -1579,6 +1601,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         ListTile(
+          leading: const Icon(Icons.storage_outlined, color: YarisTheme.blue),
           title: const Text('媒体库与缓存'),
           subtitle: const Text('扫描曲库 / 缓存用量 / 清理缓存'),
           trailing: const Icon(Icons.chevron_right),
@@ -1598,6 +1621,24 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
     ],
+  );
+}
+
+class _SettingsGroupLabel extends StatelessWidget {
+  const _SettingsGroupLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 0, 0, 7),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: YarisTheme.muted,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
   );
 }
 

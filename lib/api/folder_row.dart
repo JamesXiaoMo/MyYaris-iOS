@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'package:flutter/material.dart';
 import 'favorites.dart';
 
@@ -67,7 +68,7 @@ class _FolderRowState extends State<FolderRow> {
                   : const Duration(milliseconds: 160),
               transform: Matrix4.translationValues(offset, 0, 0),
               child: Material(
-                color: const Color(0xFF141B26),
+                color: YarisTheme.paper,
                 child: ListTile(
                   key: ValueKey('folder-${widget.folder.id}'),
                   leading: const Icon(Icons.folder_outlined),

@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'package:flutter/material.dart';
 import '../apple_map.dart';
 import 'backend.dart';
@@ -207,7 +208,7 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
         : library.folders.where((f) => f.id == selected).firstOrNull?.name ??
               '分类地址';
     return Material(
-      color: const Color(0xFF141B26),
+      color: YarisTheme.paper,
       elevation: 0,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       clipBehavior: Clip.antiAlias,
@@ -228,7 +229,7 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
               height: 4,
               margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.white38,
+                color: YarisTheme.line,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),

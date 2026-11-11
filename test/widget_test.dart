@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myyaris_ios/main.dart';
 import 'package:myyaris_ios/api/backend.dart';
+import 'package:myyaris_ios/yaris_theme.dart';
 
 class MemoryCredentials implements CredentialStore {
   String? data;
@@ -64,6 +65,7 @@ void main() {
       addTearDown(session.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          theme: YarisTheme.light,
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(
               context,

@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../yaris_theme.dart';
 import 'backend.dart';
 import 'music_queue_browser.dart';
 import 'netease_account_view.dart';
@@ -129,178 +131,319 @@ class _MusicPageState extends State<MusicPage> {
     }
   }
 
+  Future<void> transport(String action) async {
+    try {
+      await widget.session.hub.command(action);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error is ApiFailure ? error.message : '播放操作未完成'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([account, widget.session]),
-    builder: (context, _) => Stack(
-      children: [
-        RefreshIndicator(
-          onRefresh: account.refresh,
-          child: ListView(
-            padding: EdgeInsets.fromLTRB(
-              22,
-              8,
-              22,
-              184 + MediaQuery.paddingOf(context).bottom,
-            ),
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      '音乐',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+    builder: (context, _) {
+      final session = widget.session;
+      final view = session.hub.view;
+      final length = view.durationMs ?? 0;
+      final progress = length <= 0 || view.positionMs == null
+          ? null
+          : (view.positionMs! / length).clamp(0.0, 1.0).toDouble();
+      final controls = session.hub.controlsReady && !session.hub.handoffActive;
+      return RefreshIndicator(
+        onRefresh: account.refresh,
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(
+            22,
+            10,
+            22,
+            26 + MediaQuery.paddingOf(context).bottom,
+          ),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '音乐',
+                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
                   ),
-                  IconButton(
-                    key: const ValueKey('music-search-open'),
-                    tooltip: '搜索音乐',
-                    onPressed: () =>
-                        open(MusicSearchPage(session: widget.session)),
-                    icon: const Icon(Icons.search),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xB31B2230),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white10),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        ClipOval(
-                          child: MusicArtwork(
-                            url: account.profile['avatar_url'],
-                            icon: Icons.person_outline,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                account.headline,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                key: const ValueKey('netease-account-title'),
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                account.userIdLine,
-                                key: const ValueKey('netease-account-uid'),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white54,
-                                ),
-                              ),
+                IconButton.filledTonal(
+                  key: const ValueKey('music-search-open'),
+                  tooltip: '搜索音乐',
+                  onPressed: () => open(MusicSearchPage(session: session)),
+                  icon: const Icon(Icons.search),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            PlaybackTargetPicker(session: session),
+            const SizedBox(height: 12),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: YarisTheme.blue,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  height: 194,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      const Positioned.fill(
+                        child: CustomPaint(painter: _MusicCoverPainter()),
+                      ),
+                      VinylRecord(
+                        key: const ValueKey('music-record-open'),
+                        session: session,
+                        size: 148,
+                        active: widget.active,
+                        onTap: () => open(MusicPlayerPage(session: session)),
+                      ),
+                      const Positioned(
+                        left: 13,
+                        bottom: 12,
+                        child: Text(
+                          '打开播放器',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            shadows: [
+                              Shadow(color: Colors.black54, blurRadius: 6),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        TextButton(
-                          key: const ValueKey('netease-account-open'),
-                          onPressed: account.manager
-                              ? () => open(
-                                  AccountPage(session: widget.session),
-                                  accountChanged: true,
-                                )
-                              : null,
-                          child: Text(
-                            account.manager
-                                ? account.profile['logged_in'] == true
-                                      ? '切换账号'
-                                      : '登录'
-                                : '仅管理员',
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (account.busy)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 12),
-                        child: LinearProgressIndicator(),
                       ),
-                    if (account.error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Row(
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              view.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              [
+                view.stateLabel,
+                session.homeMusicDetail,
+              ].where((part) => part.isNotEmpty).join(' · '),
+              style: const TextStyle(fontSize: 12, color: YarisTheme.muted),
+            ),
+            const SizedBox(height: 9),
+            LinearProgressIndicator(
+              value: progress ?? 0,
+              semanticsLabel: '播放进度',
+              backgroundColor: YarisTheme.line,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            const SizedBox(height: 5),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  tooltip: appliedPlaybackLabel(session),
+                  onPressed: controls
+                      ? () => showQueueModes(context, session)
+                      : null,
+                  icon: Icon(switch (session.appliedQueueMode) {
+                    'shuffle' => Icons.shuffle,
+                    'intelligence' => Icons.favorite_border,
+                    'single_loop' => Icons.repeat_one,
+                    _ => Icons.repeat,
+                  }),
+                ),
+                IconButton(
+                  tooltip: '上一曲',
+                  onPressed: controls ? () => transport('prev') : null,
+                  icon: const Icon(Icons.skip_previous_rounded),
+                ),
+                IconButton.filled(
+                  tooltip: view.playing ? '暂停' : '播放',
+                  onPressed: controls
+                      ? () => transport(view.playing ? 'pause' : 'resume')
+                      : null,
+                  icon: Icon(
+                    view.playing
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '下一曲',
+                  onPressed: controls ? () => transport('next') : null,
+                  icon: const Icon(Icons.skip_next_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Card(
+              margin: EdgeInsets.zero,
+              elevation: 0,
+              color: YarisTheme.paper,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+                side: const BorderSide(color: YarisTheme.line),
+              ),
+              child: ListTile(
+                key: const ValueKey('liked-music-entry'),
+                leading: const Icon(
+                  Icons.favorite_border,
+                  color: YarisTheme.red,
+                ),
+                title: const Text(
+                  '我喜欢的音乐',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('网易云收藏音乐'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => open(LikedMusicPage(session: session)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: YarisTheme.paper,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: YarisTheme.line),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      ClipOval(
+                        child: MusicArtwork(
+                          url: account.profile['avatar_url'],
+                          icon: Icons.person_outline,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Text(
-                                account.error!,
-                                style: const TextStyle(
-                                  color: Colors.orangeAccent,
-                                ),
+                            Text(
+                              account.headline,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              key: const ValueKey('netease-account-title'),
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            TextButton(
-                              onPressed: account.busy ? null : account.refresh,
-                              child: const Text('重试'),
+                            const SizedBox(height: 6),
+                            Text(
+                              account.userIdLine,
+                              key: const ValueKey('netease-account-uid'),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.white54,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                  ],
-                ),
+                      const SizedBox(width: 6),
+                      TextButton(
+                        key: const ValueKey('netease-account-open'),
+                        onPressed: account.manager
+                            ? () => open(
+                                AccountPage(session: widget.session),
+                                accountChanged: true,
+                              )
+                            : null,
+                        child: Text(
+                          account.manager
+                              ? account.profile['logged_in'] == true
+                                    ? '切换账号'
+                                    : '登录'
+                              : '仅管理员',
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (account.busy)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (account.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              account.error!,
+                              style: const TextStyle(
+                                color: Colors.orangeAccent,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: account.busy ? null : account.refresh,
+                            child: const Text('重试'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 20),
-              Card(
-                color: const Color(0xFF151D29),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: const BorderSide(color: Colors.white10),
-                ),
-                child: ListTile(
-                  key: const ValueKey('liked-music-entry'),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                  leading: const Icon(
-                    Icons.folder_outlined,
-                    color: Color(0xFFE07892),
-                    size: 32,
-                  ),
-                  title: const Text(
-                    '网易云收藏音乐',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: const Text('我喜欢的音乐'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => open(LikedMusicPage(session: widget.session)),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-        Positioned(
-          right: 24,
-          bottom: 20 + MediaQuery.paddingOf(context).bottom,
-          child: VinylRecord(
-            key: const ValueKey('music-record-open'),
-            session: widget.session,
-            active: widget.active,
-            onTap: () => open(MusicPlayerPage(session: widget.session)),
-          ),
-        ),
-      ],
-    ),
+      );
+    },
   );
+}
+
+class _MusicCoverPainter extends CustomPainter {
+  const _MusicCoverPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final origin = Offset(size.width * .76, size.height * .51);
+    final paint = Paint();
+    for (final (factor, color) in const [
+      (.69, Color(0xFFFF7478)),
+      (.52, Color(0xFFFFAA96)),
+      (.32, Color(0xFFF8DEC2)),
+      (.13, Color(0xFF2D3AC4)),
+    ]) {
+      canvas.drawCircle(origin, size.height * factor, paint..color = color);
+    }
+    paint
+      ..color = const Color(0x99FFFFFF)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(
+      Offset(0, size.height * .94),
+      Offset(size.width * .59, 0),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(size.width * .19, size.height),
+      Offset(size.width * .80, 0),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MusicCoverPainter oldDelegate) => false;
 }
 
 class VinylRecord extends StatefulWidget {
@@ -573,215 +716,228 @@ class MusicPlayerPage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: session,
-    builder: (context, _) {
-      final artwork = musicArtworkUrl(session.hub.view.coverUrl);
-      final songId = session.hub.view.songId;
-      return Scaffold(
-        backgroundColor: const Color(0xFF0B111E),
-        body: Stack(
-          children: [
-            Positioned.fill(
-              child: ClipRect(
-                child: RepaintBoundary(
-                  child: artwork == null || MediaQuery.highContrastOf(context)
-                      ? const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Color(0xFF263345),
-                                Color(0xFF35282D),
-                                Color(0xFF0B111E),
-                              ],
-                            ),
-                          ),
-                        )
-                      : ImageFiltered(
-                          imageFilter: ui.ImageFilter.blur(
-                            sigmaX: 45,
-                            sigmaY: 45,
-                          ),
-                          child: Image.network(
-                            artwork.toString(),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                const ColoredBox(color: Color(0xFF182031)),
-                          ),
-                        ),
-                ),
-              ),
-            ),
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0x75101929),
-                      Color(0xA6101420),
-                      Color(0xF0080D15),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final size = math.min(
-                    390.0,
-                    math.max(
-                      220.0,
-                      math.min(
-                        constraints.maxWidth - 48,
-                        constraints.maxHeight * .4,
-                      ),
-                    ),
-                  );
-                  return SingleChildScrollView(
-                    key: const ValueKey('immersive-player-scroll'),
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            IconButton(
-                              key: const ValueKey('player-dismiss'),
-                              tooltip: '返回音乐',
-                              onPressed: () => Navigator.maybePop(context),
-                              icon: const Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                size: 30,
+  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.light,
+    child: Theme(
+      data: YarisTheme.player,
+      child: AnimatedBuilder(
+        animation: session,
+        builder: (context, _) {
+          final artwork = musicArtworkUrl(session.hub.view.coverUrl);
+          final songId = session.hub.view.songId;
+          return Scaffold(
+            backgroundColor: const Color(0xFF0B111E),
+            body: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRect(
+                    child: RepaintBoundary(
+                      child:
+                          artwork == null || MediaQuery.highContrastOf(context)
+                          ? const DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xFF263345),
+                                    Color(0xFF35282D),
+                                    Color(0xFF0B111E),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : ImageFiltered(
+                              imageFilter: ui.ImageFilter.blur(
+                                sigmaX: 45,
+                                sigmaY: 45,
+                              ),
+                              child: Image.network(
+                                artwork.toString(),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) =>
+                                    const ColoredBox(color: Color(0xFF182031)),
                               ),
                             ),
-                            const Expanded(
-                              child: Column(
+                    ),
+                  ),
+                ),
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x75101929),
+                          Color(0xA6101420),
+                          Color(0xF0080D15),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = math.min(
+                        390.0,
+                        math.max(
+                          220.0,
+                          math.min(
+                            constraints.maxWidth - 48,
+                            constraints.maxHeight * .4,
+                          ),
+                        ),
+                      );
+                      return SingleChildScrollView(
+                        key: const ValueKey('immersive-player-scroll'),
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                IconButton(
+                                  key: const ValueKey('player-dismiss'),
+                                  tooltip: '返回音乐',
+                                  onPressed: () => Navigator.maybePop(context),
+                                  icon: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                    size: 30,
+                                  ),
+                                ),
+                                const Expanded(
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        'MY YARIS',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          letterSpacing: 5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      SizedBox(height: 5),
+                                      Text(
+                                        '正在播放',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.white54,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuButton<int>(
+                                  key: const ValueKey('music-player-search'),
+                                  tooltip: '播放选项',
+                                  icon: const Icon(Icons.more_horiz),
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 0,
+                                      child: Text('搜索音乐'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 1,
+                                      child: Text('更多控制与状态'),
+                                    ),
+                                  ],
+                                  onSelected: (item) {
+                                    if (item == 0) {
+                                      Navigator.push<void>(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              MusicSearchPage(session: session),
+                                        ),
+                                      );
+                                    } else {
+                                      controls(context);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            PlaybackTargetPicker(session: session),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: size,
+                              height: size + 18,
+                              child: Stack(
+                                clipBehavior: Clip.none,
                                 children: [
-                                  Text(
-                                    'MY YARIS',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      letterSpacing: 5,
-                                      fontWeight: FontWeight.w600,
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top: 12,
+                                    child: VinylRecord(
+                                      session: session,
+                                      size: size,
                                     ),
                                   ),
-                                  SizedBox(height: 5),
-                                  Text(
-                                    '正在播放',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.white54,
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: CustomPaint(
+                                        painter: const _PlayerTonearmPainter(),
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            PopupMenuButton<int>(
-                              key: const ValueKey('music-player-search'),
-                              tooltip: '播放选项',
-                              icon: const Icon(Icons.more_horiz),
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(value: 0, child: Text('搜索音乐')),
-                                PopupMenuItem(value: 1, child: Text('更多控制与状态')),
-                              ],
-                              onSelected: (item) {
-                                if (item == 0) {
-                                  Navigator.push<void>(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          MusicSearchPage(session: session),
-                                    ),
-                                  );
-                                } else {
-                                  controls(context);
-                                }
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        PlaybackTargetPicker(session: session),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: size,
-                          height: size + 18,
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                top: 12,
-                                child: VinylRecord(
-                                  session: session,
-                                  size: size,
+                            const SizedBox(height: 16),
+                            PlaybackPanel(
+                              session: session,
+                              immersive: true,
+                              onSelectMusic: () => Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      MusicQueueBrowser(session: session),
                                 ),
                               ),
-                              Positioned.fill(
-                                child: IgnorePointer(
-                                  child: CustomPaint(
-                                    painter: const _PlayerTonearmPainter(),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                TextButton.icon(
+                                  key: const ValueKey('player-lyrics'),
+                                  onPressed: songId == null
+                                      ? null
+                                      : () => lyrics(context, '$songId'),
+                                  icon: const Icon(Icons.music_note_outlined),
+                                  label: const Text('歌词'),
+                                ),
+                                Tooltip(
+                                  message: '当前车机未提供可切换音质',
+                                  child: TextButton.icon(
+                                    onPressed: null,
+                                    icon: const Icon(Icons.graphic_eq),
+                                    label: const Text('音质'),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        PlaybackPanel(
-                          session: session,
-                          immersive: true,
-                          onSelectMusic: () => Navigator.push<void>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  MusicQueueBrowser(session: session),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            TextButton.icon(
-                              key: const ValueKey('player-lyrics'),
-                              onPressed: songId == null
-                                  ? null
-                                  : () => lyrics(context, '$songId'),
-                              icon: const Icon(Icons.music_note_outlined),
-                              label: const Text('歌词'),
-                            ),
-                            Tooltip(
-                              message: '当前车机未提供可切换音质',
-                              child: TextButton.icon(
-                                onPressed: null,
-                                icon: const Icon(Icons.graphic_eq),
-                                label: const Text('音质'),
-                              ),
-                            ),
-                            TextButton.icon(
-                              key: const ValueKey('player-more'),
-                              onPressed: () => controls(context),
-                              icon: const Icon(Icons.more_horiz),
-                              label: const Text('更多'),
+                                TextButton.icon(
+                                  key: const ValueKey('player-more'),
+                                  onPressed: () => controls(context),
+                                  icon: const Icon(Icons.more_horiz),
+                                  label: const Text('更多'),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
-    },
+          );
+        },
+      ),
+    ),
   );
 }
 

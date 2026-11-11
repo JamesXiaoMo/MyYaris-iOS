@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'car_model.dart';
 import 'glass_tab_bar.dart';
+import 'yaris_theme.dart';
 import 'verification/favorites_evidence.dart';
 import 'verification/home_evidence.dart';
 import 'verification/music_diagnostic.dart';
@@ -12,17 +13,15 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-const _background = Color(0xFF090B10);
-const _muted = Color(0xFF9398A6);
-const _blue = Color(0xFF44C5FF);
-const _homeAccent = Color(0xFF91D8D0);
-const _homeSurface = Color(0xFF131C21);
-const _homeBorder = Color(0xFF273438);
+const _muted = YarisTheme.muted;
+const _homeAccent = YarisTheme.blue;
+const _homeSurface = YarisTheme.paper;
+const _homeBorder = YarisTheme.line;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
   runApp(const MyYarisApp());
 }
 
@@ -54,19 +53,7 @@ class _MyYarisAppState extends State<MyYarisApp> {
       child: AuthenticationGate(session: session, child: child!),
     ),
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: _background,
-      colorScheme: const ColorScheme.dark(
-        primary: _blue,
-        surface: Color(0xFF11151D),
-      ),
-      fontFamily: '.SF Pro Text',
-      useMaterial3: true,
-      snackBarTheme: const SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-      ),
-    ),
+    theme: YarisTheme.light,
     home: YarisShell(session: session, initializeSession: false),
   );
 }
@@ -149,34 +136,12 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: session,
     builder: (context, _) => AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: SystemUiOverlayStyle.dark,
       child: Scaffold(
         extendBody: true,
+        backgroundColor: YarisTheme.canvas,
         body: Stack(
           children: [
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 540,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: _index == 0
-                        ? const [
-                            Color(0xFF101A20),
-                            Color(0xFF183039),
-                            Color(0xFF10191E),
-                            _background,
-                          ]
-                        : const [Color(0xFF08132F), _background],
-                    stops: _index == 0 ? const [0, .37, .72, 1] : null,
-                  ),
-                ),
-              ),
-            ),
             SafeArea(
               bottom: false,
               child: IndexedStack(
@@ -191,6 +156,8 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
                     onPrevious: () => _command('prev'),
                     onNext: () => _command('next'),
                     onDriving: () => setState(() => _index = 1),
+                    onMusic: () => setState(() => _index = 2),
+                    onSettings: () => setState(() => _index = 3),
                   ),
                   NavigationPage(session: session, active: _index == 1),
                   MusicPage(session: session, active: _index == 2),
@@ -207,6 +174,8 @@ class _YarisShellState extends State<YarisShell> with WidgetsBindingObserver {
             ? const SizedBox.shrink()
             : GlassTabBar(
                 index: _index,
+                lightAppearance:
+                    Theme.of(context).colorScheme.primary == YarisTheme.blue,
                 onChanged: (index) => setState(() => _index = index),
               ),
       ),
@@ -223,19 +192,31 @@ class _HomePage extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     required this.onDriving,
+    required this.onMusic,
+    required this.onSettings,
   });
 
   final BackendSession session;
   final bool playing;
-  final VoidCallback onPlay, onRepeat, onPrevious, onNext, onDriving;
+  final VoidCallback onPlay,
+      onRepeat,
+      onPrevious,
+      onNext,
+      onDriving,
+      onMusic,
+      onSettings;
 
   @override
   Widget build(BuildContext context) {
+    final light = Theme.of(context).colorScheme.primary == YarisTheme.blue;
     final connectionColor = switch (session.homeConnectionState) {
-      HomeConnectionState.backendOffline => const Color(0xFFFF6370),
-      HomeConnectionState.carOffline => const Color(0xFFFFCC66),
-      HomeConnectionState.online => const Color(0xFF48D882),
-      HomeConnectionState.checking => _muted,
+      HomeConnectionState.backendOffline =>
+        light ? YarisTheme.red : const Color(0xFFFF6370),
+      HomeConnectionState.carOffline =>
+        light ? const Color(0xFF805700) : const Color(0xFFFFCC66),
+      HomeConnectionState.online =>
+        light ? const Color(0xFF155D46) : const Color(0xFF48D882),
+      HomeConnectionState.checking => light ? _muted : const Color(0xFF9398A6),
     };
     return SingleChildScrollView(
       key: const ValueKey('home-scroll'),
@@ -248,46 +229,103 @@ class _HomePage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
             children: [
-              const Text(
-                'MyYaris',
-                style: TextStyle(
-                  color: _homeAccent,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: .45,
+              const Expanded(
+                child: Text(
+                  '我的车',
+                  style: TextStyle(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w800,
+                    color: YarisTheme.ink,
+                  ),
                 ),
               ),
-              _badge(
-                session.homeConnectionLabel,
-                connectionColor,
-                icon: Icons.circle,
-                iconSize: 6,
+              IconButton.filledTonal(
+                tooltip: '打开设置',
+                onPressed: onSettings,
+                icon: const Icon(CupertinoIcons.gear_alt),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          const Text(
-            'Toyota Yaris',
-            style: TextStyle(
-              fontSize: 39,
-              height: 1.08,
-              letterSpacing: -1.6,
-              fontWeight: FontWeight.w700,
+          const SizedBox(height: 12),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: YarisTheme.periwinkle,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Text(
+                        'HYBRID',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: YarisTheme.blue,
+                        ),
+                      ),
+                      _badge(
+                        session.homeConnectionLabel,
+                        connectionColor,
+                        icon: Icons.circle,
+                        iconSize: 6,
+                      ),
+                    ],
+                  ),
+                  const Text(
+                    'YARIS',
+                    style: TextStyle(
+                      fontSize: 66,
+                      height: 1,
+                      letterSpacing: -4,
+                      fontWeight: FontWeight.w900,
+                      color: YarisTheme.blue,
+                    ),
+                  ),
+                  LayoutBuilder(
+                    builder: (context, constraints) => SizedBox(
+                      height: (constraints.maxWidth * .59)
+                          .clamp(150.0, 230.0)
+                          .toDouble(),
+                      child: const CarModel(),
+                    ),
+                  ),
+                  const Text(
+                    'Toyota Yaris',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: YarisTheme.ink,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (context, constraints) => SizedBox(
-              height: (constraints.maxWidth * .72)
-                  .clamp(192.0, 278.0)
-                  .toDouble(),
-              child: const CarModel(),
-            ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: onDriving,
+                icon: const Icon(CupertinoIcons.location_north_fill),
+                label: const Text('找目的地'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: onMusic,
+                icon: const Icon(CupertinoIcons.music_note),
+                label: const Text('打开音乐'),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           _musicCard(),
@@ -415,6 +453,7 @@ class _HomePage extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
+                      color: YarisTheme.ink,
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                     ),
@@ -446,7 +485,7 @@ class _HomePage extends StatelessWidget {
     height: 44,
     alignment: Alignment.center,
     decoration: BoxDecoration(
-      color: const Color(0xFF203136),
+      color: YarisTheme.periwinkle,
       borderRadius: BorderRadius.circular(14),
     ),
     child: Icon(icon, size: 19, color: _homeAccent),
@@ -463,7 +502,7 @@ class _HomePage extends StatelessWidget {
     icon: Icon(icon, size: primary ? 21 : 19),
     style: IconButton.styleFrom(
       minimumSize: const Size(48, 48),
-      foregroundColor: primary ? const Color(0xFF0C2725) : Colors.white,
+      foregroundColor: primary ? Colors.white : YarisTheme.ink,
       backgroundColor: primary ? _homeAccent : Colors.transparent,
     ),
   );

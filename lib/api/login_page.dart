@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -179,7 +180,7 @@ class _LoginPageState extends State<LoginPage> {
           const SizedBox(height: 16),
           const Text(
             '密码不会保存在App。会话安全保存在本机Keychain。\n注册只创建普通用户；车机权限由管理员授权。\n旧连接配置与收藏不自动迁移到新账号。',
-            style: TextStyle(color: Colors.white54, fontSize: 12),
+            style: TextStyle(color: YarisTheme.muted, fontSize: 12),
           ),
         ],
       ),

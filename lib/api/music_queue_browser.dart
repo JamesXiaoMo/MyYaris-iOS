@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'package:flutter/material.dart';
 import 'backend.dart';
 import 'music_queue_contract.dart';
@@ -128,7 +129,7 @@ class QueueModeCaption extends StatelessWidget {
           children: [
             Text(
               appliedPlaybackLabel(session),
-              style: const TextStyle(fontSize: 12, color: Colors.white60),
+              style: const TextStyle(fontSize: 12, color: YarisTheme.muted),
             ),
             TextButton(
               key: const ValueKey('queue-mode-menu'),
@@ -147,7 +148,7 @@ class QueueModeCaption extends StatelessWidget {
             !session.hasAppliedQueue || actual == null
                 ? '模式待确认 · 默认：我喜欢的音乐'
                 : '已应用：${appliedPlaybackLabel(session)}',
-            style: const TextStyle(fontSize: 12, color: Colors.white60),
+            style: const TextStyle(fontSize: 12, color: YarisTheme.muted),
           ),
           if (session.queueV2Ready &&
               requested != null &&

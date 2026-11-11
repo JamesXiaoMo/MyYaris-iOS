@@ -2,11 +2,18 @@ import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'yaris_theme.dart';
 
 /// Flutter-drawn glass styling, not Apple's native Liquid Glass material.
 class GlassTabBar extends StatefulWidget {
-  const GlassTabBar({super.key, required this.index, required this.onChanged});
+  const GlassTabBar({
+    super.key,
+    required this.index,
+    required this.onChanged,
+    this.lightAppearance = false,
+  });
   final int index;
+  final bool lightAppearance;
   final ValueChanged<int> onChanged;
 
   @override
@@ -96,6 +103,7 @@ class _GlassTabBarState extends State<GlassTabBar>
 
   @override
   Widget build(BuildContext context) {
+    final light = widget.lightAppearance;
     final solid =
         _reduceTransparency ||
         MediaQuery.highContrastOf(context) ||
@@ -125,12 +133,16 @@ class _GlassTabBarState extends State<GlassTabBar>
               filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: solid
+                  color: light
+                      ? (solid ? YarisTheme.paper : const Color(0xEFFFFDF6))
+                      : solid
                       ? const Color(0xFF202631)
                       : const Color(0x18202631),
                   borderRadius: BorderRadius.circular(36),
-                  border: Border.all(color: const Color(0x35FFFFFF)),
-                  gradient: solid
+                  border: Border.all(
+                    color: light ? YarisTheme.line : const Color(0x35FFFFFF),
+                  ),
+                  gradient: solid || light
                       ? null
                       : const LinearGradient(
                           begin: Alignment.topLeft,
@@ -186,12 +198,19 @@ class _GlassTabBarState extends State<GlassTabBar>
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(31),
                                       border: Border.all(
-                                        color: const Color(0x55FFFFFF),
+                                        color: light
+                                            ? YarisTheme.periwinkle
+                                            : const Color(0x55FFFFFF),
                                       ),
                                       gradient: LinearGradient(
                                         begin: Alignment.topLeft,
                                         end: Alignment.bottomRight,
-                                        colors: solid
+                                        colors: light
+                                            ? const [
+                                                YarisTheme.periwinkle,
+                                                YarisTheme.periwinkle,
+                                              ]
+                                            : solid
                                             ? const [
                                                 Color(0xFF4A5669),
                                                 Color(0xFF4A5669),
@@ -233,7 +252,11 @@ class _GlassTabBarState extends State<GlassTabBar>
                                                     _icons[index],
                                                     size: 23,
                                                     color: widget.index == index
-                                                        ? Colors.white
+                                                        ? (light
+                                                              ? YarisTheme.blue
+                                                              : Colors.white)
+                                                        : light
+                                                        ? YarisTheme.muted
                                                         : const Color(
                                                             0xFFADB9CB,
                                                           ),
@@ -253,7 +276,13 @@ class _GlassTabBarState extends State<GlassTabBar>
                                                         color:
                                                             widget.index ==
                                                                 index
-                                                            ? Colors.white
+                                                            ? (light
+                                                                  ? YarisTheme
+                                                                        .blue
+                                                                  : Colors
+                                                                        .white)
+                                                            : light
+                                                            ? YarisTheme.muted
                                                             : const Color(
                                                                 0xFFADB9CB,
                                                               ),

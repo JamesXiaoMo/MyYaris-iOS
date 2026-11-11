@@ -1,3 +1,4 @@
+import '../yaris_theme.dart';
 import 'package:flutter/material.dart';
 import 'backend.dart';
 import '../apple_map.dart';
@@ -99,7 +100,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
           padding: EdgeInsets.symmetric(horizontal: 20),
           child: Text(
             '保存后仅填入目的地，发送到车机前仍需确认',
-            style: TextStyle(color: Colors.white54),
+            style: TextStyle(color: YarisTheme.muted),
           ),
         ),
         if (error != null)
@@ -145,7 +146,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                           Text(item.address),
                           Text(
                             '${item.coordSystem.toUpperCase()} · 纬度 ${item.latitude}\n经度 ${item.longitude}',
-                            style: const TextStyle(color: Colors.white60),
+                            style: const TextStyle(color: YarisTheme.muted),
                           ),
                           Wrap(
                             alignment: WrapAlignment.end,
