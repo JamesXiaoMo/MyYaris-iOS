@@ -1,7 +1,7 @@
 import '../yaris_theme.dart';
-import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'backend.dart';
 
 class AuthenticationGate extends StatelessWidget {
@@ -33,7 +33,8 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   late final base = TextEditingController(text: widget.session.api.baseUrl);
-  final username = TextEditingController(),
+  final port = TextEditingController(),
+      username = TextEditingController(),
       password = TextEditingController(),
       nickname = TextEditingController();
   bool register = false, busy = false;
@@ -41,6 +42,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void dispose() {
     base.dispose();
+    port.dispose();
     username.dispose();
     password.dispose();
     nickname.dispose();
@@ -49,11 +51,31 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> submit() async {
     if (busy) return;
-    setState(() => busy = true);
+    final String origin;
+    try {
+      final address = BackendApi.validateBase(base.text);
+      final override = port.text.trim();
+      if (override.isEmpty) {
+        origin = address.origin;
+      } else {
+        final value = int.tryParse(override);
+        if (value == null || value < 1 || value > 65535) {
+          throw ApiFailure('服务器端口须为 1～65535');
+        }
+        origin = address.replace(port: value).origin;
+      }
+    } on ApiFailure catch (e) {
+      setState(() => message = e.message);
+      return;
+    }
+    setState(() {
+      busy = true;
+      message = '';
+    });
     try {
       if (register) {
         await widget.session.register(
-          base.text,
+          origin,
           username.text,
           password.text,
           nickname.text,
@@ -65,7 +87,7 @@ class _LoginPageState extends State<LoginPage> {
           });
         }
       } else {
-        await widget.session.login(base.text, username.text, password.text);
+        await widget.session.login(origin, username.text, password.text);
       }
     } catch (e) {
       if (mounted) {
@@ -101,8 +123,27 @@ class _LoginPageState extends State<LoginPage> {
             controller: base,
             enabled: !busy,
             autocorrect: false,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
               labelText: '服务器地址（HTTPS）',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const ValueKey('login-port'),
+            controller: port,
+            enabled: !busy,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(5),
+            ],
+            decoration: const InputDecoration(
+              labelText: '服务器端口（选填）',
+              hintText: '例如 8443',
               border: OutlineInputBorder(),
             ),
           ),

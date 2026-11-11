@@ -440,7 +440,9 @@ void main() {
         find.byKey(const ValueKey('login-password')),
         'wrong-fixture-password',
       );
-      await tester.tap(find.byKey(const ValueKey('login-submit')));
+      final submit = find.byKey(const ValueKey('login-submit'));
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
       await tester.pumpAndSettle();
       expect(find.text('用户名或密码不正确'), findsOneWidget);
       expect(
@@ -452,4 +454,47 @@ void main() {
       );
     },
   );
+  testWidgets('login accepts a separate port and stores the HTTPS origin', (
+    tester,
+  ) async {
+    final settings = MemoryStore();
+    final requests = <Uri>[];
+    final session = AccountSession(
+      api: BackendApi(
+        baseUrl: fixtureBackend,
+        client: MockClient((request) async {
+          requests.add(request.url);
+          return jsonReply(loginBody(), 200);
+        }),
+      ),
+      store: MemoryStore(),
+      authStore: MemoryStore(),
+      settingsStore: settings,
+    );
+    addTearDown(session.dispose);
+    await tester.pumpWidget(MaterialApp(home: LoginPage(session: session)));
+    final port = find.byKey(const ValueKey('login-port'));
+    final submit = find.byKey(const ValueKey('login-submit'));
+    await tester.enterText(port, '65536');
+    await tester.enterText(
+      find.byKey(const ValueKey('login-username')),
+      'fixture_user',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('login-password')),
+      'fixture-password',
+    );
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+    expect(find.text('服务器端口须为 1～65535'), findsOneWidget);
+
+    await tester.enterText(port, '8443');
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(requests, [Uri.parse('$fixtureBackend:8443/api/v1/auth/login')]);
+    expect(jsonDecode(settings.value!)['base'], '$fixtureBackend:8443');
+  });
 }
