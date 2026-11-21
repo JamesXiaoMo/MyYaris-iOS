@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
 import 'backend.dart';
+import 'liked_music_store.dart';
 import 'local_audio.dart';
 import 'local_player.dart';
 import 'music_queue_contract.dart';
@@ -104,7 +105,7 @@ class PlaybackHub extends ChangeNotifier {
   Handoff? handoff;
   String _sessionId = '';
   int _gen = 0;
-  bool _disposed = false, _operationBusy = false;
+  bool _disposed = false, _operationBusy = false, _userPickedTarget = false;
   String? _unresolvedCarCommand;
 
   String get sessionId => _sessionId;
@@ -131,6 +132,7 @@ class PlaybackHub extends ChangeNotifier {
     final old = _sessionId;
     handoff = null;
     target = PlaybackTarget.car;
+    _userPickedTarget = false;
     _sessionId = _newSessionId();
     unawaited(local.release().catchError((Object _) {}));
     if (session.api.configured) {
@@ -458,12 +460,67 @@ class PlaybackHub extends ChangeNotifier {
     if (gen != _gen || _disposed) throw ApiFailure('登录状态已切换，旧播放列表已清除');
   }
 
+  /// Switches the initial default output to the phone when the car is offline
+  /// and the user has not explicitly chosen a target yet. Never interrupts
+  /// active playback or handoffs.
+  void adoptPhoneWhenCarOffline() {
+    if (_userPickedTarget ||
+        handoffActive ||
+        _operationBusy ||
+        local.isPlaying ||
+        target != PlaybackTarget.car ||
+        session.homeConnectionState != HomeConnectionState.carOffline) {
+      return;
+    }
+    target = PlaybackTarget.phone;
+    _publish();
+  }
+
+  LikedMusicScope? _likedScope() {
+    try {
+      final origin = BackendApi.validateBase(session.api.baseUrl).origin;
+      final account = session.requireUserLogin
+          ? '${session.userProfile['id'] ?? ''}'
+          : 'legacy-device';
+      if (account.isEmpty || session.api.deviceId.isEmpty) return null;
+      return LikedMusicScope(
+        origin: origin,
+        account: account,
+        device: session.api.deviceId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<LocalQueue?> _tryLoadCachedFavorite(String mode) async {
+    final scope = _likedScope();
+    if (scope == null) return null;
+    final snap = await LikedMusicStore.shared.load(scope);
+    if (snap == null || snap.tracks.isEmpty) return null;
+    final normalized = [
+      for (final raw in snap.tracks) _normalizeTrack(raw),
+    ];
+    return LocalQueue(
+      source: 'netease_favorite',
+      queueId: 'cached_fav_${snap.playlistId}',
+      version: snap.revision,
+      tracks: normalized,
+      mode: mode,
+    );
+  }
+
   Future<LocalQueue> _loadFavorite({
     required String mode,
     String? queueId,
     int? version,
   }) async {
     final gen = _gen;
+    if (queueId == null && version == null) {
+      final cached = await _tryLoadCachedFavorite(mode);
+      _ensureSameSession(gen);
+      if (cached != null) return cached;
+    }
     final accumulator = MusicQueueAccumulator();
     MusicQueuePage? first;
     var offset = 0;
@@ -666,6 +723,7 @@ class PlaybackHub extends ChangeNotifier {
   /// Explicit user choice of output. Moving audible/loaded playback is an ordered handoff; with
   /// nothing loaded on the other side it only changes the selected output.
   Future<void> selectTarget(PlaybackTarget to) async {
+    _userPickedTarget = true;
     final running = handoff;
     if (running != null && running.active) {
       if (running.to == to) {

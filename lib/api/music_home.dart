@@ -101,12 +101,16 @@ class _MusicPageState extends State<MusicPage> {
   void initState() {
     super.initState();
     account.refresh();
+    widget.session.hub.adoptPhoneWhenCarOffline();
   }
 
   @override
   void didUpdateWidget(covariant MusicPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.active && !oldWidget.active) account.refresh();
+    if (widget.active && !oldWidget.active) {
+      account.refresh();
+      widget.session.hub.adoptPhoneWhenCarOffline();
+    }
   }
 
   @override
