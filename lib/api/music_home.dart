@@ -6,6 +6,7 @@ import '../yaris_theme.dart';
 import 'backend.dart';
 import 'music_queue_browser.dart';
 import 'netease_account_view.dart';
+import 'playback_hub.dart' show PlaybackTarget;
 import 'playback_target.dart';
 import 'liked_music_page.dart';
 import 'pages.dart' show MusicSearchPage, PlaybackPanel, AccountPage;
@@ -132,13 +133,37 @@ class _MusicPageState extends State<MusicPage> {
   }
 
   Future<void> transport(String action) async {
+    final session = widget.session;
     try {
-      await widget.session.hub.command(action);
+      await session.hub.command(action);
+    } catch (error) {
+      if (!mounted) return;
+      final canSwitchLocal =
+          !session.hub.phoneTarget && !session.hub.handoffActive;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error is ApiFailure ? error.message : '播放操作未完成'),
+          action: canSwitchLocal
+              ? SnackBarAction(
+                  label: '切到本机',
+                  onPressed: () {
+                    session.hub.selectTarget(PlaybackTarget.phone);
+                  },
+                )
+              : null,
+        ),
+      );
+    }
+  }
+
+  Future<void> _selectMode(String mode) async {
+    try {
+      await widget.session.hub.chooseMode(mode);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error is ApiFailure ? error.message : '播放操作未完成'),
+          content: Text(error is ApiFailure ? error.message : '播放模式切换未完成'),
         ),
       );
     }
@@ -289,6 +314,27 @@ class _MusicPageState extends State<MusicPage> {
               ],
             ),
             const SizedBox(height: 8),
+            Row(
+              children: [
+                for (final entry in const [
+                  ('list_loop', '喜欢循环', false),
+                  ('shuffle', '喜欢随机', false),
+                  ('intelligence', '网易云心动', true),
+                ]) ...[
+                  if (entry.$1 != 'list_loop') const SizedBox(width: 8),
+                  Expanded(
+                    child: _QuickModePill(
+                      label: entry.$2,
+                      selected: session.appliedQueueMode == entry.$1,
+                      isHeart: entry.$3,
+                      enabled: controls,
+                      onTap: () => _selectMode(entry.$1),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 10),
             Card(
               margin: EdgeInsets.zero,
               elevation: 0,
@@ -999,4 +1045,66 @@ class _PlayerTonearmPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_PlayerTonearmPainter oldDelegate) => false;
+}
+
+class _QuickModePill extends StatelessWidget {
+  const _QuickModePill({
+    required this.label,
+    required this.selected,
+    required this.isHeart,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool isHeart;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = isHeart
+        ? (selected ? YarisTheme.red : YarisTheme.rose)
+        : (selected ? YarisTheme.periwinkle : YarisTheme.neutral);
+    final fg = isHeart
+        ? (selected ? Colors.white : YarisTheme.red)
+        : (selected ? YarisTheme.blue : YarisTheme.ink);
+
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.55,
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: enabled ? onTap : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (isHeart) ...[
+                  Icon(Icons.favorite_rounded, size: 13, color: fg),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
