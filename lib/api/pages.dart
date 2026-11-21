@@ -11,6 +11,7 @@ export 'music_home.dart' show MusicPage, MusicPlayerPage;
 import '../apple_map.dart';
 import '../map_search_page.dart';
 import 'driving_favorites_drawer.dart';
+import 'trips_page.dart';
 
 const _muted = YarisTheme.muted;
 
@@ -576,9 +577,40 @@ class _NavigationPageState extends State<NavigationPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                '行驶',
-                style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '行驶',
+                      style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('trips-page-open'),
+                    onPressed: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TripsPage(session: widget.session),
+                      ),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: YarisTheme.periwinkle,
+                      foregroundColor: YarisTheme.blue,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    icon: const Icon(Icons.route_rounded, size: 18),
+                    label: const Text(
+                      '行程',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               FilledButton.tonalIcon(

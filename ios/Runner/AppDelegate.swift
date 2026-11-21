@@ -329,6 +329,9 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
       case "locate": self.beginLocation(result)
       case "search": self.startSearch(call.arguments as? String ?? "", result: result)
       case "cancelSearch": self.cancelSearch(); result(nil)
+      case "setRoute":
+        self.applyRoute(call.arguments as? [[String: Any]] ?? [])
+        result(nil)
       case "dispose": self.release(); result(nil)
       default: result(FlutterMethodNotImplemented)
       }
@@ -455,6 +458,50 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     }
     pendingPick = work
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+  }
+  private func applyRoute(_ rawPoints: [[String: Any]]) {
+    map.removeOverlays(map.overlays)
+    map.removeAnnotations(map.annotations)
+    var coords: [CLLocationCoordinate2D] = []
+    for item in rawPoints {
+      guard let lat = (item["latitude"] as? NSNumber)?.doubleValue,
+            let lon = (item["longitude"] as? NSNumber)?.doubleValue else { continue }
+      let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+      if lat.isFinite && lon.isFinite && CLLocationCoordinate2DIsValid(c) {
+        coords.append(c)
+      }
+    }
+    guard !coords.isEmpty else { return }
+    if let first = coords.first {
+      let startPin = MKPointAnnotation()
+      startPin.coordinate = first
+      startPin.title = "起点"
+      map.addAnnotation(startPin)
+    }
+    if coords.count >= 2, let last = coords.last {
+      let endPin = MKPointAnnotation()
+      endPin.coordinate = last
+      endPin.title = "终点"
+      map.addAnnotation(endPin)
+      let polyline = MKPolyline(coordinates: coords, count: coords.count)
+      map.addOverlay(polyline)
+      let rect = polyline.boundingMapRect
+      let padding = UIEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
+      map.setVisibleMapRect(rect, edgePadding: padding, animated: !UIAccessibility.isReduceMotionEnabled)
+    } else if let only = coords.first {
+      map.setRegion(MKCoordinateRegion(center: only, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: !UIAccessibility.isReduceMotionEnabled)
+    }
+  }
+  func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+    if let polyline = overlay as? MKPolyline {
+      let renderer = MKPolylineRenderer(polyline: polyline)
+      renderer.strokeColor = UIColor(red: 53.0/255.0, green: 72.0/255.0, blue: 232.0/255.0, alpha: 0.92)
+      renderer.lineWidth = 4.5
+      renderer.lineCap = .round
+      renderer.lineJoin = .round
+      return renderer
+    }
+    return MKOverlayRenderer(overlay: overlay)
   }
   func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
     cameraMoving = true; cameraEpoch += 1; regionChanges += 1

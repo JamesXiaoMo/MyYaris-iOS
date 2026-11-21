@@ -661,6 +661,27 @@ class BackendApi {
     }
   }
 
+  Future<List<Map<String, dynamic>>> fetchTrips({int limit = 30}) async {
+    final raw = await call(
+      'GET',
+      '/api/v1/trips',
+      query: {'limit': '$limit'},
+    );
+    final items = raw['trips'];
+    if (items is! List) throw ApiFailure('行程列表响应格式错误');
+    return [for (final item in items) if (item is Map) Map<String, dynamic>.from(item)];
+  }
+
+  Future<Map<String, dynamic>> fetchTripDetail(String tripId) async {
+    final encoded = Uri.encodeComponent(tripId);
+    return call('GET', '/api/v1/trips/$encoded');
+  }
+
+  Future<void> deleteTrip(String tripId) async {
+    final encoded = Uri.encodeComponent(tripId);
+    await call('DELETE', '/api/v1/trips/$encoded');
+  }
+
   void close() => client.close();
 }
 

@@ -69,6 +69,14 @@ class AppleMapController {
       /* The map may already be disposed. */
     }
   }
+
+  Future<void> setRoute(List<Map<String, double>> points) async {
+    try {
+      await channel?.invokeMethod<void>('setRoute', points);
+    } on PlatformException {
+      /* The map may not be ready yet. */
+    }
+  }
 }
 
 class AppleMap extends StatefulWidget {
