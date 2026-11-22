@@ -122,11 +122,18 @@ class _LoginPageState extends State<LoginPage> {
             controller: base,
             enabled: !busy,
             autocorrect: false,
+            minLines: 1,
+            maxLines: 2,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: '服务器地址（HTTPS）',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                tooltip: '清空服务器地址',
+                onPressed: busy ? null : () => setState(base.clear),
+                icon: const Icon(Icons.clear),
+              ),
             ),
           ),
           const SizedBox(height: 16),
