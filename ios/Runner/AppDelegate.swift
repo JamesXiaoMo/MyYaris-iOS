@@ -284,7 +284,7 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     locator.desiredAccuracy = kCLLocationAccuracyHundredMeters
     map.isPitchEnabled = false
     map.showsUserLocation = false
-    map.overrideUserInterfaceStyle = .dark
+    map.overrideUserInterfaceStyle = .light
     // The map extends beneath the drawer's transparent top corners. Keep
     // Apple's attribution above that 24pt overlap, not under the drawer.
     map.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 36, right: 8)

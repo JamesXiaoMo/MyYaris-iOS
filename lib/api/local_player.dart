@@ -437,6 +437,20 @@ class LocalPlayer extends ChangeNotifier {
 
   // ---------------------------------------------------------------- public operations
 
+  /// Restores the last-played track & cursor silently without loading media or starting audio.
+  void restoreCursor(
+    LocalQueue restored, {
+    int positionMs = 0,
+    int durationMs = 0,
+  }) {
+    if (_disposed || queue != null || _loadedEpoch != null) return;
+    queue = restored;
+    this.positionMs = positionMs < 0 ? 0 : positionMs;
+    this.durationMs = durationMs < 0 ? 0 : durationMs;
+    phase = LocalPhase.paused;
+    _notify();
+  }
+
   Future<void> start(
     LocalQueue next, {
     int index = 0,

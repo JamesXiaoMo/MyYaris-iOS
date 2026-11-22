@@ -108,6 +108,7 @@ class _MusicPageState extends State<MusicPage> {
     super.initState();
     account.refresh();
     widget.session.hub.adoptPhoneWhenCarOffline();
+    widget.session.hub.restoreLastTrack();
   }
 
   @override

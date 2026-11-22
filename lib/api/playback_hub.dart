@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
@@ -89,8 +91,100 @@ class PlaybackHub extends ChangeNotifier {
       engine: engine ?? NativeLocalAudioEngine(),
       resolveMedia: (track) => session.api.localMedia(track),
       continueHeart: _continueHeart,
-    )..addListener(notifyListeners);
+    )..addListener(_onLocalChanged);
     _sessionId = _newSessionId();
+  }
+
+  static File? _lastTrackFile() {
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return null;
+    final home = Platform.environment['HOME'];
+    final base = home == null || home.isEmpty
+        ? Directory.systemTemp.path
+        : '$home/Library/Caches';
+    return File('$base/myyaris_last_local_track_v1.json');
+  }
+
+  int? _lastSavedSongId;
+  int _lastSavedAtMs = 0;
+
+  void _onLocalChanged() {
+    notifyListeners();
+    final t = local.track;
+    final q = local.queue;
+    if (t == null || q == null) return;
+    final songId = t['song_id'] is int ? t['song_id'] as int : null;
+    if (songId == null || songId <= 0) return;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final trackChanged = songId != _lastSavedSongId;
+    final pausedNow = local.phase == LocalPhase.paused;
+    if (!trackChanged && !pausedNow && nowMs - _lastSavedAtMs < 5000) return;
+    _lastSavedSongId = songId;
+    _lastSavedAtMs = nowMs;
+    unawaited(_persistLastTrack(t, q, local.positionMs, local.durationMs));
+  }
+
+  Future<void> _persistLastTrack(
+    Map<String, dynamic> track,
+    LocalQueue q,
+    int positionMs,
+    int durationMs,
+  ) async {
+    try {
+      final file = _lastTrackFile();
+      if (file == null) return;
+      final payload = <String, dynamic>{
+        'song_id': track['song_id'],
+        'track_id': track['track_id'],
+        'title': track['title'],
+        'artist': track['artist'],
+        'album': track['album'],
+        'duration_ms': durationMs > 0 ? durationMs : (track['duration_ms'] ?? 0),
+        'cover_url': track['cover_url'],
+        'source': q.source,
+        'mode': q.mode,
+        'position_ms': positionMs,
+      };
+      await file.parent.create(recursive: true);
+      final tmp = File('${file.path}.tmp');
+      await tmp.writeAsString(jsonEncode(payload), flush: true);
+      await tmp.rename(file.path);
+    } catch (_) {}
+  }
+
+  /// Restores the last-played local track silently on app open (never auto-plays audio).
+  Future<void> restoreLastTrack() async {
+    if (_disposed || local.queue != null || local.hasMedia) return;
+    try {
+      final file = _lastTrackFile();
+      if (file == null || !await file.exists()) return;
+      final raw = await file.readAsString();
+      if (raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final songId = decoded['song_id'];
+      if (songId is! int || songId <= 0) return;
+      final mode = decoded['mode'] is String ? decoded['mode'] as String : 'list_loop';
+      final posMs = decoded['position_ms'] is int ? decoded['position_ms'] as int : 0;
+      final durMs = decoded['duration_ms'] is int ? decoded['duration_ms'] as int : 0;
+      final source = decoded['source'] is String ? decoded['source'] as String : 'netease_favorite';
+
+      LocalQueue? restored;
+      if (source == 'netease_favorite') {
+        final cached = await _tryLoadCachedFavorite(mode);
+        if (cached != null) {
+          final idx = cached.tracks.indexWhere((t) => t['song_id'] == songId);
+          if (idx >= 0) {
+            cached.select(idx);
+            restored = cached;
+          }
+        }
+      }
+      restored ??= LocalQueue.single(_normalizeTrack(Map<String, dynamic>.from(decoded)));
+      if (local.queue == null && !local.hasMedia && !_disposed) {
+        _lastSavedSongId = songId;
+        local.restoreCursor(restored, positionMs: posMs, durationMs: durMs);
+      }
+    } catch (_) {}
   }
 
   final BackendSession session;
@@ -1289,7 +1383,7 @@ class PlaybackHub extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _gen++;
-    local.removeListener(notifyListeners);
+    local.removeListener(_onLocalChanged);
     local.dispose();
     super.dispose();
   }

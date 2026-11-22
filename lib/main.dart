@@ -36,7 +36,7 @@ class _MyYarisAppState extends State<MyYarisApp> {
   @override
   void initState() {
     super.initState();
-    unawaited(session.initialize());
+    unawaited(session.initialize().then((_) => session.hub.restoreLastTrack()));
   }
 
   @override
