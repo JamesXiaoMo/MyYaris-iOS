@@ -18,6 +18,10 @@ const defaultBackend = String.fromEnvironment(
   'MY_YARIS_BACKEND',
   defaultValue: '',
 );
+const embeddedApiToken = String.fromEnvironment(
+  'MY_YARIS_API_TOKEN',
+  defaultValue: '',
+);
 const verifyMode = bool.fromEnvironment('MY_YARIS_VERIFY_LOGS');
 void verifyLog(String event) {
   if (verifyMode) debugPrint('[MyYarisVerify] $event');
@@ -819,6 +823,23 @@ class BackendSession extends ChangeNotifier {
     restoringSession = true;
     publish();
     try {
+      if (defaultBackend.trim().isNotEmpty && embeddedApiToken.trim().isNotEmpty) {
+        api.baseUrl = BackendApi.validateBase(defaultBackend).origin;
+        api.token = embeddedApiToken.trim();
+        api.isUserSession = false;
+        userProfile = const {
+          'id': 'embedded_owner',
+          'username': 'owner',
+          'nickname': 'Owner',
+          'role': 'admin',
+          'is_active': true,
+          'has_device_control': true,
+        };
+        authenticated = true;
+        await restoreNavigation();
+        start();
+        return;
+      }
       final rawSettings = await settingsStore.load();
       final legacy = rawSettings == null ? await store.load() : null;
       final config = rawSettings ?? legacy;
