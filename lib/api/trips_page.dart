@@ -169,6 +169,12 @@ class _TripsPageState extends State<TripsPage> {
   );
   String? _selectedTripId;
   int _chartTab = 0; // 0 = 速度, 1 = 加速度
+  int _mileageDays = 7; // 7 = 一周, 30 = 一个月
+  List<Map<String, dynamic>> _dailyStats = const [];
+  double _periodTotalKm = 0.0;
+  int _periodTotalTrips = 0;
+  int? _selectedBarIndex;
+  bool _loadingDailyStats = false;
   bool _loadingList = true;
   bool _loadingDetail = false;
   String? _error;
@@ -177,6 +183,34 @@ class _TripsPageState extends State<TripsPage> {
   void initState() {
     super.initState();
     _loadTrips();
+    _loadDailyStats(_mileageDays);
+  }
+
+  Future<void> _loadDailyStats(int days) async {
+    setState(() {
+      _mileageDays = days;
+      _loadingDailyStats = true;
+      _selectedBarIndex = null;
+    });
+    try {
+      final raw = await widget.session.api.fetchDailyTripStats(days: days);
+      if (!mounted || _mileageDays != days) return;
+      final items = raw['items'] is List
+          ? [
+              for (final item in raw['items'] as List)
+                if (item is Map) Map<String, dynamic>.from(item),
+            ]
+          : <Map<String, dynamic>>[];
+      setState(() {
+        _dailyStats = items;
+        _periodTotalKm = (raw['total_distance_km'] as num?)?.toDouble() ?? 0.0;
+        _periodTotalTrips = (raw['total_trips'] as num?)?.toInt() ?? 0;
+        _loadingDailyStats = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingDailyStats = false);
+    }
   }
 
   Future<void> _loadTrips() async {
@@ -321,13 +355,20 @@ class _TripsPageState extends State<TripsPage> {
         actions: [
           IconButton(
             tooltip: '刷新行程',
-            onPressed: _loadingList ? null : _loadTrips,
+            onPressed: _loadingList
+                ? null
+                : () {
+                    _loadTrips();
+                    _loadDailyStats(_mileageDays);
+                  },
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadTrips,
+        onRefresh: () async {
+          await Future.wait([_loadTrips(), _loadDailyStats(_mileageDays)]);
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
           children: [
@@ -391,6 +432,11 @@ class _TripsPageState extends State<TripsPage> {
             // Speed & Acceleration chart card
             _buildTelemetryChartCard(),
 
+            const SizedBox(height: 12),
+
+            // Weekly / Monthly daily mileage bar chart card
+            _buildDailyMileageCard(),
+
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -439,6 +485,126 @@ class _TripsPageState extends State<TripsPage> {
               ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDailyMileageCard() {
+    final isWeek = _mileageDays == 7;
+    final items = _dailyStats;
+    var maxKm = 0.0;
+    for (final item in items) {
+      final km = (item['distance_km'] as num?)?.toDouble() ?? 0.0;
+      if (km > maxKm) maxKm = km;
+    }
+    final scaleMax = maxKm > 0 ? maxKm : 1.0;
+
+    final selectedItem = (_selectedBarIndex != null &&
+            _selectedBarIndex! >= 0 &&
+            _selectedBarIndex! < items.length)
+        ? items[_selectedBarIndex!]
+        : null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: YarisTheme.paper,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: YarisTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '每日里程',
+                style: TextStyle(
+                  color: YarisTheme.ink,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              _ChartSwitchPill(
+                label: '一周',
+                selected: isWeek,
+                onTap: () {
+                  if (!isWeek) _loadDailyStats(7);
+                },
+              ),
+              const SizedBox(width: 6),
+              _ChartSwitchPill(
+                label: '一个月',
+                selected: !isWeek,
+                onTap: () {
+                  if (isWeek) _loadDailyStats(30);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                selectedItem != null
+                    ? '${selectedItem['date']}  ${((selectedItem['distance_km'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)} km'
+                    : '合计 ${_periodTotalKm.toStringAsFixed(1)} km',
+                style: TextStyle(
+                  color: selectedItem != null ? YarisTheme.red : YarisTheme.blue,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                selectedItem != null
+                    ? '${(selectedItem['trip_count'] as num?)?.toInt() ?? 0} 次行程'
+                    : '$_periodTotalTrips 次有效行程',
+                style: const TextStyle(color: YarisTheme.muted, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 138,
+            child: _loadingDailyStats && items.isEmpty
+                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                : items.isEmpty
+                    ? const Center(
+                        child: Text(
+                          '暂无每日里程数据',
+                          style: TextStyle(color: YarisTheme.muted, fontSize: 12.5),
+                        ),
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          for (var i = 0; i < items.length; i++)
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => setState(() {
+                                  _selectedBarIndex = _selectedBarIndex == i ? null : i;
+                                }),
+                                child: _DailyMileageBar(
+                                  label: '${items[i]['label'] ?? ''}',
+                                  km: (items[i]['distance_km'] as num?)?.toDouble() ?? 0.0,
+                                  ratio: (((items[i]['distance_km'] as num?)?.toDouble() ?? 0.0) /
+                                          scaleMax)
+                                      .clamp(0.0, 1.0),
+                                  isWeek: isWeek,
+                                  isToday: i == items.length - 1,
+                                  isSelected: _selectedBarIndex == i,
+                                  showMonthTick:
+                                      i == 0 || i == items.length - 1 || i % 7 == 0,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+          ),
+        ],
       ),
     );
   }
@@ -619,6 +785,94 @@ class _TripsPageState extends State<TripsPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DailyMileageBar extends StatelessWidget {
+  const _DailyMileageBar({
+    required this.label,
+    required this.km,
+    required this.ratio,
+    required this.isWeek,
+    required this.isToday,
+    required this.isSelected,
+    required this.showMonthTick,
+  });
+
+  final String label;
+  final double km;
+  final double ratio;
+  final bool isWeek;
+  final bool isToday;
+  final bool isSelected;
+  final bool showMonthTick;
+
+  @override
+  Widget build(BuildContext context) {
+    final barColor = isSelected
+        ? YarisTheme.red
+        : (km > 0
+            ? (isToday ? YarisTheme.red.withValues(alpha: 0.85) : YarisTheme.blue)
+            : YarisTheme.line);
+    final barHeight = km > 0 ? math.max(8.0, ratio * 88.0) : 4.0;
+    final showLabel = isWeek || showMonthTick;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        if (isWeek)
+          SizedBox(
+            height: 16,
+            child: km > 0
+                ? FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      km >= 10 ? km.toStringAsFixed(0) : km.toStringAsFixed(1),
+                      style: TextStyle(
+                        color: isSelected ? YarisTheme.red : YarisTheme.muted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          )
+        else
+          const SizedBox(height: 16),
+        const SizedBox(height: 3),
+        Expanded(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: isWeek ? 18 : 6,
+              height: barHeight,
+              decoration: BoxDecoration(
+                color: barColor,
+                borderRadius: BorderRadius.circular(isWeek ? 6 : 3),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 14,
+          child: showLabel
+              ? FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: (isSelected || isToday) ? YarisTheme.ink : YarisTheme.muted,
+                      fontSize: 10,
+                      fontWeight: (isSelected || isToday) ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }

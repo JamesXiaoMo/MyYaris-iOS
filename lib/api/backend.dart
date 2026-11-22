@@ -681,6 +681,18 @@ class BackendApi {
     return call('GET', '/api/v1/trips/$encoded');
   }
 
+  Future<Map<String, dynamic>> fetchDailyTripStats({int days = 7}) async {
+    final tzOffset = DateTime.now().timeZoneOffset.inMinutes;
+    return call(
+      'GET',
+      '/api/v1/trips/stats/daily',
+      query: {
+        'days': '$days',
+        'tz_offset_minutes': '$tzOffset',
+      },
+    );
+  }
+
   Future<void> deleteTrip(String tripId) async {
     final encoded = Uri.encodeComponent(tripId);
     await call('DELETE', '/api/v1/trips/$encoded');
