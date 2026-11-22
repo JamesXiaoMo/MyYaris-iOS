@@ -97,6 +97,12 @@ class MusicPage extends StatefulWidget {
 
 class _MusicPageState extends State<MusicPage> {
   late final account = NeteaseAccountView(widget.session);
+  double? _seekDraft;
+
+  String _formatMs(int ms) {
+    final sec = ms < 0 ? 0 : ms ~/ 1000;
+    return '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
+  }
   @override
   void initState() {
     super.initState();
@@ -179,11 +185,14 @@ class _MusicPageState extends State<MusicPage> {
     builder: (context, _) {
       final session = widget.session;
       final view = session.hub.view;
-      final length = view.durationMs ?? 0;
-      final progress = length <= 0 || view.positionMs == null
-          ? null
-          : (view.positionMs! / length).clamp(0.0, 1.0).toDouble();
       final controls = session.hub.controlsReady && !session.hub.handoffActive;
+      final length = view.durationMs ?? 0;
+      final rawPos = view.positionMs ?? 0;
+      final canSeek = controls && length > 0 && view.positionMs != null;
+      final sliderMax = length > 0 ? length.toDouble() : 1.0;
+      final sliderVal = (_seekDraft ?? rawPos.toDouble())
+          .clamp(0.0, sliderMax)
+          .toDouble();
       return RefreshIndicator(
         onRefresh: account.refresh,
         child: ListView(
@@ -256,29 +265,75 @@ class _MusicPageState extends State<MusicPage> {
               ].where((part) => part.isNotEmpty).join(' · '),
               style: const TextStyle(fontSize: 12, color: YarisTheme.muted),
             ),
-            const SizedBox(height: 9),
-            LinearProgressIndicator(
-              value: progress ?? 0,
-              semanticsLabel: '播放进度',
-              backgroundColor: YarisTheme.line,
-              borderRadius: BorderRadius.circular(4),
+            const SizedBox(height: 6),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                activeTrackColor: YarisTheme.blue,
+                inactiveTrackColor: YarisTheme.line,
+                thumbColor: YarisTheme.blue,
+              ),
+              child: Slider(
+                key: const ValueKey('music-progress-slider'),
+                value: sliderVal,
+                min: 0,
+                max: sliderMax,
+                onChanged: canSeek
+                    ? (v) => setState(() => _seekDraft = v)
+                    : null,
+                onChangeEnd: canSeek
+                    ? (v) async {
+                        try {
+                          await session.hub.command('seek', {
+                            'seek_ms': v.round(),
+                          });
+                        } catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  error is ApiFailure
+                                      ? error.message
+                                      : '进度调整未完成',
+                                ),
+                              ),
+                            );
+                          }
+                        } finally {
+                          if (mounted) setState(() => _seekDraft = null);
+                        }
+                      }
+                    : null,
+              ),
             ),
-            const SizedBox(height: 5),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    length > 0 ? _formatMs(sliderVal.round()) : '--:--',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: YarisTheme.muted,
+                    ),
+                  ),
+                  Text(
+                    length > 0 ? _formatMs(length) : '--:--',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: YarisTheme.muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                IconButton(
-                  tooltip: appliedPlaybackLabel(session),
-                  onPressed: controls
-                      ? () => showQueueModes(context, session)
-                      : null,
-                  icon: Icon(switch (session.appliedQueueMode) {
-                    'shuffle' => Icons.shuffle,
-                    'intelligence' => Icons.favorite_border,
-                    'single_loop' => Icons.repeat_one,
-                    _ => Icons.repeat,
-                  }),
-                ),
                 IconButton(
                   tooltip: '上一曲',
                   onPressed: controls ? () => transport('prev') : null,

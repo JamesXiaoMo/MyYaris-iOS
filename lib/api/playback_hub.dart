@@ -514,9 +514,10 @@ class PlaybackHub extends ChangeNotifier {
     required String mode,
     String? queueId,
     int? version,
+    bool skipCache = false,
   }) async {
     final gen = _gen;
-    if (queueId == null && version == null) {
+    if (!skipCache && queueId == null && version == null) {
       final cached = await _tryLoadCachedFavorite(mode);
       _ensureSameSession(gen);
       if (cached != null) return cached;
@@ -897,14 +898,48 @@ class PlaybackHub extends ChangeNotifier {
         if (queue.mode == 'single_loop') 'mode': 'single_loop',
       };
     }
-    final ref = await api.transferQueue(
-      'export',
-      sessionId: _sessionId,
-      queueId: queue.queueId,
-      queueVersion: queue.version,
-    );
+    var targetQueueId = queue.queueId;
+    var targetQueueVersion = queue.version;
+    var targetIndex = snap.index;
+
+    Future<Map<String, dynamic>> exportQueue(String qid, int qver) =>
+        api.transferQueue(
+          'export',
+          sessionId: _sessionId,
+          queueId: qid,
+          queueVersion: qver,
+        );
+
+    Map<String, dynamic> ref;
+    if (queue.source == 'netease_favorite' &&
+        targetQueueId.startsWith('cached_fav_')) {
+      final fresh = await _loadFavorite(mode: snap.mode, skipCache: true);
+      final idx = fresh.tracks.indexWhere((t) => t['song_id'] == song);
+      if (idx < 0) throw ApiFailure('这首歌已不在喜欢歌单中，原输出保持不变');
+      targetQueueId = fresh.queueId;
+      targetQueueVersion = fresh.version;
+      targetIndex = idx;
+      ref = await exportQueue(targetQueueId, targetQueueVersion);
+    } else {
+      try {
+        ref = await exportQueue(targetQueueId, targetQueueVersion);
+      } on ApiFailure catch (e) {
+        if (e.statusCode == 409 && queue.source == 'netease_favorite') {
+          final fresh = await _loadFavorite(mode: snap.mode, skipCache: true);
+          final idx = fresh.tracks.indexWhere((t) => t['song_id'] == song);
+          if (idx < 0) throw ApiFailure('这首歌已不在喜欢歌单中，原输出保持不变');
+          targetQueueId = fresh.queueId;
+          targetQueueVersion = fresh.version;
+          targetIndex = idx;
+          ref = await exportQueue(targetQueueId, targetQueueVersion);
+        } else {
+          rethrow;
+        }
+      }
+    }
+
     final id = ref['queue_id'], version = ref['queue_version'];
-    if (id != queue.queueId ||
+    if (id != targetQueueId ||
         version is! int ||
         ref['source'] != queue.source) {
       throw ApiFailure('播放队列无法完整交给车机，原输出保持不变');
@@ -913,7 +948,7 @@ class PlaybackHub extends ChangeNotifier {
       ...base(queue.source),
       'queue_id': id,
       'queue_version': version,
-      'queue_index': snap.index,
+      'queue_index': targetIndex,
       if (const {'list_loop', 'shuffle', 'single_loop'}.contains(snap.mode))
         'mode': snap.mode,
     };
