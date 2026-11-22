@@ -236,21 +236,6 @@ class _MusicPageState extends State<MusicPage> {
                         active: widget.active,
                         onTap: () => open(MusicPlayerPage(session: session)),
                       ),
-                      const Positioned(
-                        left: 13,
-                        bottom: 12,
-                        child: Text(
-                          '打开播放器',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            shadows: [
-                              Shadow(color: Colors.black54, blurRadius: 6),
-                            ],
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -357,7 +342,6 @@ class _MusicPageState extends State<MusicPage> {
                   '我喜欢的音乐',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
-                subtitle: const Text('网易云收藏音乐'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => open(LikedMusicPage(session: session)),
               ),

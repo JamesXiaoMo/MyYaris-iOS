@@ -1416,7 +1416,7 @@ class _TrackPageState extends State<TrackPage> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.graphic_eq),
               title: Text('音质'),
-              subtitle: Text('由车机与网易云自动选择，当前不支持单独切换'),
+              trailing: Text('自动'),
             ),
             TextButton(
               onPressed: () => showApiResult(
@@ -1623,7 +1623,6 @@ class _SettingsPageState extends State<SettingsPage> {
         ListTile(
           leading: const Icon(Icons.music_note, color: YarisTheme.blue),
           title: const Text('网易云账号'),
-          subtitle: const Text('扫码登录 / 凭据导入 / 保持登录 / 退出'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(
             context,
@@ -1635,7 +1634,6 @@ class _SettingsPageState extends State<SettingsPage> {
         ListTile(
           leading: const Icon(Icons.storage_outlined, color: YarisTheme.blue),
           title: const Text('媒体库与缓存'),
-          subtitle: const Text('扫描曲库 / 缓存用量 / 清理缓存'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(
             context,
@@ -1891,10 +1889,6 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
           ),
           if (qrImage != null) QrImage(data: qrImage!),
           Text(message),
-          const Text(
-            '使用另一设备的网易云 App 扫码并确认；登录凭据只保存在服务器。',
-            style: TextStyle(color: _muted),
-          ),
         ]),
         card([
           TextField(
@@ -1902,7 +1896,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
             obscureText: true,
             enableSuggestions: false,
             autocorrect: false,
-            decoration: const InputDecoration(labelText: '网易云登录凭据（仅本次输入）'),
+            decoration: const InputDecoration(labelText: '网易云登录凭据'),
           ),
           TextButton(
             onPressed: busy
@@ -1934,7 +1928,7 @@ class _AccountPageState extends State<AccountPage> with WidgetsBindingObserver {
                       if (mounted) setState(() => busy = false);
                     }
                   },
-            child: const Text('导入凭据（不在手机保存）'),
+            child: const Text('导入凭据'),
           ),
           TextButton(
             onPressed: () => showApiResult(
@@ -2050,10 +2044,6 @@ class MediaAdminPage extends StatelessWidget {
               }
             },
             child: const Text('按服务器配额清理缓存'),
-          ),
-          const Text(
-            '不提供任意服务器目录输入，也不会自动扫描或清理缓存。',
-            style: TextStyle(color: _muted),
           ),
         ]),
       ],

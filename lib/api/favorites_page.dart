@@ -96,13 +96,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
             ),
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
-          child: Text(
-            '保存后仅填入目的地，发送到车机前仍需确认',
-            style: TextStyle(color: YarisTheme.muted),
-          ),
-        ),
         if (error != null)
           Padding(
             padding: const EdgeInsets.all(20),
@@ -492,7 +485,6 @@ class _FavoriteEditorState extends State<FavoriteEditor> {
                 onPressed: loadFolders,
                 child: Text('分类加载失败，点击重试：$folderError'),
               ),
-            const Text('仅保存收藏，不发送导航'),
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
             if (busy) const LinearProgressIndicator(),

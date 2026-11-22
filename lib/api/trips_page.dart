@@ -427,7 +427,7 @@ class _TripsPageState extends State<TripsPage> {
                   border: Border.all(color: YarisTheme.line),
                 ),
                 child: const Text(
-                  '暂无行程记录\n车机启动后每 10 秒自动上传位置。',
+                  '暂无行程记录',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: YarisTheme.muted, fontSize: 14),
                 ),
@@ -532,13 +532,13 @@ class _TripsPageState extends State<TripsPage> {
                         key: const ValueKey('trip-speed-chart'),
                         painter: _SpeedChartPainter(_series.speedsKmh),
                       )
-                    : const _EmptyChartHint('定位点不足，行驶产生连续轨迹后自动显示速度曲线'))
+                    : const _EmptyChartHint('暂无速度数据'))
                 : (hasAccel
                     ? CustomPaint(
                         key: const ValueKey('trip-accel-chart'),
                         painter: _AccelerationChartPainter(_series.accelsMs2),
                       )
-                    : const _EmptyChartHint('定位点不足，行驶产生连续轨迹后自动显示加速度曲线')),
+                    : const _EmptyChartHint('暂无加速度数据')),
           ),
         ],
       ),

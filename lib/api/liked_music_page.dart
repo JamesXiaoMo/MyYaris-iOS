@@ -122,14 +122,14 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
             itemCount: model.tracks.length + 2,
             itemBuilder: (context, index) {
               if (index == 0) {
+                if (!model.loaded && model.syncError == null) {
+                  return const SizedBox.shrink();
+                }
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('这是服务器管理员的网易云喜欢歌单，仅管理员账号可以查看。'),
-                      const SizedBox(height: 8),
-                      const Text('部分歌曲可能因版权或会员限制只能试听。'),
                       if (model.loaded)
                         Text(
                           model.statusLine,
@@ -197,13 +197,10 @@ class _LikedMusicPageState extends State<LikedMusicPage> {
                   leading: cover(track),
                   title: Text(track['title'] as String),
                   subtitle: Text(
-                    '${track['artist']} · ${track['album'] ?? ''}\n${duration ~/ 60000}:${((duration ~/ 1000) % 60).toString().padLeft(2, '0')} · ${unavailable
-                        ? '暂不可播放（版权或地区限制）'
-                        : (track['fee'] as num? ?? 0) > 0
-                        ? '可能需要会员，点击后确认'
-                        : '点击发送到车机'}',
+                    '${track['artist']} · ${duration ~/ 60000}:${((duration ~/ 1000) % 60).toString().padLeft(2, '0')}${unavailable ? ' · 暂不可播放' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  isThreeLine: true,
                   trailing: Icon(disabled ? Icons.block : Icons.play_arrow),
                   onTap: disabled ? null : () => play(track),
                 ),
