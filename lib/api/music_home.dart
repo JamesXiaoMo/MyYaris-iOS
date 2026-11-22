@@ -205,23 +205,27 @@ class _MusicPageState extends State<MusicPage> {
           ),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    '音乐',
-                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
-                  ),
-                ),
-                IconButton.filledTonal(
-                  key: const ValueKey('music-search-open'),
-                  tooltip: '搜索音乐',
-                  onPressed: () => open(MusicSearchPage(session: session)),
-                  icon: const Icon(Icons.search),
-                ),
-              ],
+            const Text(
+              '音乐',
+              style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              key: const ValueKey('music-search-open'),
+              onPressed: () => open(MusicSearchPage(session: session)),
+              style: FilledButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                minimumSize: const Size(0, 44),
+                backgroundColor: YarisTheme.neutral,
+                foregroundColor: YarisTheme.muted,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              icon: const Icon(Icons.search, color: YarisTheme.blue),
+              label: const Text('搜索网易云歌曲、歌手…'),
+            ),
+            const SizedBox(height: 10),
             PlaybackTargetPicker(session: session),
             const SizedBox(height: 12),
             DecoratedBox(

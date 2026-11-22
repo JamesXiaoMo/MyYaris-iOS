@@ -7,6 +7,7 @@ import 'backend.dart';
 import 'music_queue_browser.dart';
 import 'playback_target.dart';
 import 'login_page.dart';
+import 'music_home.dart' show MusicArtwork;
 export 'music_home.dart' show MusicPage, MusicPlayerPage;
 import '../apple_map.dart';
 import '../map_search_page.dart';
@@ -857,93 +858,175 @@ class _MusicSearchPageState extends State<MusicSearchPage> {
               '账号已登录，但未授权当前车机；请联系管理员绑定后再播放。',
               style: TextStyle(color: Colors.orangeAccent),
             ),
-          card([
-            DropdownButtonFormField<String>(
-              initialValue: source,
-              items: const [
-                DropdownMenuItem(value: 'netease', child: Text('网易云在线')),
-                DropdownMenuItem(value: 'local_repo', child: Text('本地曲库')),
-                DropdownMenuItem(value: 'netease_cache', child: Text('网易云缓存')),
-              ],
-              onChanged: busy
-                  ? null
-                  : (v) => setState(() {
-                      source = v!;
-                      tracks = [];
-                      total = 0;
-                    }),
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+            decoration: BoxDecoration(
+              color: YarisTheme.paper,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: YarisTheme.line),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const ValueKey('music-input'),
-              controller: keyword,
-              decoration: const InputDecoration(
-                labelText: '歌曲 / 艺术家 / 专辑',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => search(),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              key: const ValueKey('music-preview'),
-              onPressed: busy ? null : () => search(),
-              child: Text(busy ? '搜索中…' : '搜索曲库'),
-            ),
-            if (error != null)
-              Text(error!, style: const TextStyle(color: Colors.orangeAccent)),
-            if (error != null)
-              const Text('搜索失败，请检查网络或稍后重试')
-            else if (searched && tracks.isEmpty)
-              const Text('没有找到相关歌曲，请更换关键词或来源')
-            else if (searched)
-              Text('共 $total 首', style: const TextStyle(color: _muted)),
-          ]),
-          ...tracks.map(
-            (track) => card([
-              Text(
-                '${track['title'] ?? track['track_id']}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+            child: Row(
+              children: [
+                const Icon(Icons.search, color: YarisTheme.blue, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('music-input'),
+                    controller: keyword,
+                    textInputAction: TextInputAction.search,
+                    decoration: const InputDecoration(
+                      hintText: '搜索网易云歌曲、歌手…',
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => search(),
+                  ),
                 ),
-              ),
-              Text(
-                '${track['artist'] ?? ''} · ${track['album'] ?? ''}',
-                style: const TextStyle(color: _muted),
-              ),
-              Wrap(
-                spacing: 8,
-                children: [
-                  FilledButton.icon(
-                    onPressed: selecting || !widget.session.hub.controlsReady
-                        ? null
-                        : () => play(track),
-                    icon: const Icon(Icons.play_arrow),
-                    label: Text(
-                      selecting
-                          ? '正在准备…'
-                          : widget.session.hub.phoneTarget
-                          ? '在本机播放'
-                          : '发送到车机播放',
+                const SizedBox(width: 6),
+                FilledButton(
+                  key: const ValueKey('music-preview'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: YarisTheme.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
                     ),
                   ),
-                  TextButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => TrackPage(
-                          session: widget.session,
-                          track: track,
-                          onPlay: play,
-                        ),
+                  onPressed: busy ? null : () => search(),
+                  child: Text(busy ? '搜索中…' : '搜索'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                error!,
+                style: const TextStyle(color: YarisTheme.red, fontSize: 13),
+              ),
+            )
+          else if (searched && tracks.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text('没有找到相关歌曲', style: TextStyle(color: _muted)),
+              ),
+            )
+          else if (searched)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                '共 $total 首',
+                style: const TextStyle(color: _muted, fontSize: 12.5),
+              ),
+            ),
+          if (tracks.isNotEmpty)
+            Container(
+              decoration: BoxDecoration(
+                color: YarisTheme.paper,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: YarisTheme.line),
+              ),
+              child: Column(
+                children: [
+                  for (var i = 0; i < tracks.length; i++) ...[
+                    if (i > 0) const Divider(height: 1, color: YarisTheme.line),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: MusicArtwork(
+                              url: tracks[i]['cover_url'],
+                              size: 46,
+                            ),
+                          ),
+                          const SizedBox(width: 11),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => TrackPage(
+                                    session: widget.session,
+                                    track: tracks[i],
+                                    onPlay: play,
+                                  ),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${tracks[i]['title'] ?? tracks[i]['track_id']}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    [
+                                      '${tracks[i]['artist'] ?? ''}',
+                                      '${tracks[i]['album'] ?? ''}',
+                                    ].where((s) => s.trim().isNotEmpty).join(' · '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: _muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: YarisTheme.blue,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              minimumSize: const Size(0, 34),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                            onPressed:
+                                selecting || !widget.session.hub.controlsReady
+                                    ? null
+                                    : () => play(tracks[i]),
+                            child: Text(
+                              selecting
+                                  ? '准备中…'
+                                  : widget.session.hub.phoneTarget
+                                      ? '播放'
+                                      : '车机播放',
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: const Text('详情 / 歌词'),
-                  ),
+                  ],
                 ],
               ),
-            ]),
-          ),
+            ),
           if (tracks.length < total)
             TextButton(
               onPressed: busy
