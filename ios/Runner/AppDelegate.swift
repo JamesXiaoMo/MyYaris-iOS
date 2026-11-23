@@ -25,6 +25,37 @@ import UniformTypeIdentifiers
     // strand embedded MapKit gestures after a Flutter overlay is touched.
     engineBridge.applicationRegistrar.register(YarisMapFactory(messenger: engineBridge.applicationRegistrar.messenger()), withId: "io.myyaris/map", gestureRecognizersBlockingPolicy: FlutterPlatformViewGestureRecognizersBlockingPolicyWaitUntilTouchesEnded)
     localAudio = YarisLocalAudio(messenger: engineBridge.applicationRegistrar.messenger())
+    let shareChannel = FlutterMethodChannel(name: "io.myyaris/share", binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    shareChannel.setMethodCallHandler { call, result in
+      guard call.method == "shareImage",
+            let args = call.arguments as? [String: Any],
+            let typed = args["bytes"] as? FlutterStandardTypedData,
+            let image = UIImage(data: typed.data) else {
+        result(FlutterError(code: "INVALID_IMAGE", message: "无法生成分享图片", details: nil))
+        return
+      }
+      DispatchQueue.main.async {
+        guard let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              var presenter = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+          result(FlutterError(code: "NO_WINDOW", message: "无法打开系统分享面板", details: nil))
+          return
+        }
+        while let presented = presenter.presentedViewController { presenter = presented }
+        var items: [Any] = [image]
+        if let caption = args["text"] as? String, !caption.isEmpty {
+          items.append(caption)
+        }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let pop = vc.popoverPresentationController {
+          pop.sourceView = presenter.view
+          pop.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+          pop.permittedArrowDirections = []
+        }
+        presenter.present(vc, animated: true) {
+          result(true)
+        }
+      }
+    }
     let channel = FlutterMethodChannel(name: "io.myyaris/credentials", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { call, result in
       let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
