@@ -693,6 +693,28 @@ class BackendApi {
     );
   }
 
+  Future<Map<String, dynamic>> fetchVehicleState({String? deviceId}) {
+    return call(
+      'GET',
+      '/api/v1/vehicle/state',
+      query: {'device_id': deviceId ?? this.deviceId},
+    );
+  }
+
+  Future<Map<String, dynamic>> fetchVehicleHistory({
+    int limit = 120,
+    String? deviceId,
+  }) {
+    return call(
+      'GET',
+      '/api/v1/vehicle/history',
+      query: {
+        'limit': '$limit',
+        'device_id': deviceId ?? this.deviceId,
+      },
+    );
+  }
+
   Future<void> deleteTrip(String tripId) async {
     final encoded = Uri.encodeComponent(tripId);
     await call('DELETE', '/api/v1/trips/$encoded');

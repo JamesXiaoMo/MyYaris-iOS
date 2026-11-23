@@ -5,9 +5,14 @@ import '../yaris_theme.dart';
 import 'backend.dart';
 
 class TripChartSample {
-  const TripChartSample({required this.seconds, required this.value});
+  const TripChartSample({
+    required this.seconds,
+    required this.value,
+    this.timestamp,
+  });
   final double seconds;
   final double value;
+  final DateTime? timestamp;
 }
 
 class TripTelemetrySeries {
@@ -93,7 +98,13 @@ class TripTelemetrySeries {
         }
       }
       if (v != null) {
-        speeds.add(TripChartSample(seconds: sec < 0 ? 0 : sec, value: v));
+        speeds.add(
+          TripChartSample(
+            seconds: sec < 0 ? 0 : sec,
+            value: v,
+            timestamp: p.time,
+          ),
+        );
       }
     }
 
@@ -105,7 +116,13 @@ class TripTelemetrySeries {
       if (dt >= 1.0 && dt <= 60.0) {
         final dvMs = (cur.value - prev.value) / 3.6;
         final a = (dvMs / dt).clamp(-10.0, 10.0);
-        accels.add(TripChartSample(seconds: cur.seconds, value: a));
+        accels.add(
+          TripChartSample(
+            seconds: cur.seconds,
+            value: a,
+            timestamp: cur.timestamp,
+          ),
+        );
       }
     }
 
@@ -169,6 +186,7 @@ class _TripsPageState extends State<TripsPage> {
   );
   String? _selectedTripId;
   int _chartTab = 0; // 0 = 速度, 1 = 加速度
+  int? _scrubSampleIndex;
   int _mileageDays = 7; // 7 = 一周, 30 = 一个月
   List<Map<String, dynamic>> _dailyStats = const [];
   double _periodTotalKm = 0.0;
@@ -262,6 +280,7 @@ class _TripsPageState extends State<TripsPage> {
       setState(() {
         _selectedDetail = detail;
         _series = computed;
+        _scrubSampleIndex = null;
         _loadingDetail = false;
       });
       final route = <Map<String, double>>[];
@@ -609,10 +628,54 @@ class _TripsPageState extends State<TripsPage> {
     );
   }
 
+  String _formatClockHms(DateTime? dt, double fallbackSeconds) {
+    if (dt != null) {
+      final l = dt.toLocal();
+      final hh = l.hour.toString().padLeft(2, '0');
+      final mm = l.minute.toString().padLeft(2, '0');
+      final ss = l.second.toString().padLeft(2, '0');
+      return '$hh:$mm:$ss';
+    }
+    final s = fallbackSeconds.round();
+    final m = s ~/ 60;
+    final rem = s % 60;
+    return '${m.toString().padLeft(2, '0')}:${rem.toString().padLeft(2, '0')}';
+  }
+
+  int _findNearestSampleIndex(
+    List<TripChartSample> samples,
+    double dx,
+    double width,
+  ) {
+    const leftPad = 36.0;
+    const rightPad = 8.0;
+    final w = math.max(1.0, width - leftPad - rightPad);
+    final frac = ((dx - leftPad) / w).clamp(0.0, 1.0);
+    final minT = samples.first.seconds;
+    final spanT = math.max(1.0, samples.last.seconds - minT);
+    final targetT = minT + frac * spanT;
+    var bestIdx = 0;
+    var bestDiff = (samples.first.seconds - targetT).abs();
+    for (var i = 1; i < samples.length; i++) {
+      final diff = (samples[i].seconds - targetT).abs();
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
   Widget _buildTelemetryChartCard() {
     final isSpeed = _chartTab == 0;
-    final hasSpeed = _series.speedsKmh.length >= 2;
-    final hasAccel = _series.accelsMs2.length >= 2;
+    final samples = isSpeed ? _series.speedsKmh : _series.accelsMs2;
+    final hasData = samples.length >= 2;
+    final scrubbed = (hasData &&
+            _scrubSampleIndex != null &&
+            _scrubSampleIndex! >= 0 &&
+            _scrubSampleIndex! < samples.length)
+        ? samples[_scrubSampleIndex!]
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -638,18 +701,62 @@ class _TripsPageState extends State<TripsPage> {
               _ChartSwitchPill(
                 label: '速度',
                 selected: isSpeed,
-                onTap: () => setState(() => _chartTab = 0),
+                onTap: () => setState(() {
+                  _chartTab = 0;
+                  _scrubSampleIndex = null;
+                }),
               ),
               const SizedBox(width: 6),
               _ChartSwitchPill(
                 label: '加速度',
                 selected: !isSpeed,
-                onTap: () => setState(() => _chartTab = 1),
+                onTap: () => setState(() {
+                  _chartTab = 1;
+                  _scrubSampleIndex = null;
+                }),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          if (isSpeed)
+          if (scrubbed != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: YarisTheme.periwinkle,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    _formatClockHms(scrubbed.timestamp, scrubbed.seconds),
+                    style: const TextStyle(
+                      color: YarisTheme.ink,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    isSpeed
+                        ? '${scrubbed.value.toStringAsFixed(1)} km/h'
+                        : '${scrubbed.value >= 0 ? "+" : ""}${scrubbed.value.toStringAsFixed(2)} m/s²',
+                    style: TextStyle(
+                      color: isSpeed
+                          ? YarisTheme.blue
+                          : (scrubbed.value >= 0 ? YarisTheme.blue : YarisTheme.red),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => setState(() => _scrubSampleIndex = null),
+                    child: const Icon(Icons.close_rounded, size: 15, color: YarisTheme.muted),
+                  ),
+                ],
+              ),
+            )
+          else if (isSpeed)
             Row(
               children: [
                 Text(
@@ -691,20 +798,45 @@ class _TripsPageState extends State<TripsPage> {
             ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 136,
-            child: isSpeed
-                ? (hasSpeed
-                    ? CustomPaint(
-                        key: const ValueKey('trip-speed-chart'),
-                        painter: _SpeedChartPainter(_series.speedsKmh),
-                      )
-                    : const _EmptyChartHint('暂无速度数据'))
-                : (hasAccel
-                    ? CustomPaint(
-                        key: const ValueKey('trip-accel-chart'),
-                        painter: _AccelerationChartPainter(_series.accelsMs2),
-                      )
-                    : const _EmptyChartHint('暂无加速度数据')),
+            height: 144,
+            child: !hasData
+                ? _EmptyChartHint(isSpeed ? '暂无速度数据' : '暂无加速度数据')
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      void updateScrub(double dx) {
+                        final idx = _findNearestSampleIndex(
+                          samples,
+                          dx,
+                          constraints.maxWidth,
+                        );
+                        if (_scrubSampleIndex != idx) {
+                          setState(() => _scrubSampleIndex = idx);
+                        }
+                      }
+
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (d) => updateScrub(d.localPosition.dx),
+                        onHorizontalDragStart: (d) => updateScrub(d.localPosition.dx),
+                        onHorizontalDragUpdate: (d) => updateScrub(d.localPosition.dx),
+                        child: CustomPaint(
+                          key: ValueKey(
+                            isSpeed ? 'trip-speed-chart' : 'trip-accel-chart',
+                          ),
+                          size: Size(constraints.maxWidth, 144),
+                          painter: isSpeed
+                              ? _SpeedChartPainter(
+                                  samples,
+                                  selectedIndex: _scrubSampleIndex,
+                                )
+                              : _AccelerationChartPainter(
+                                  samples,
+                                  selectedIndex: _scrubSampleIndex,
+                                ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -935,8 +1067,9 @@ class _EmptyChartHint extends StatelessWidget {
 }
 
 class _SpeedChartPainter extends CustomPainter {
-  _SpeedChartPainter(this.samples);
+  _SpeedChartPainter(this.samples, {this.selectedIndex});
   final List<TripChartSample> samples;
+  final int? selectedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1004,24 +1137,33 @@ class _SpeedChartPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
     canvas.drawPath(path, linePaint);
 
-    _drawText(canvas, '0s', Offset(leftPad, topPad + h + 4), 48, TextAlign.left);
-    _drawText(
-      canvas,
-      spanT >= 60 ? '${(spanT / 60).toStringAsFixed(1)}分' : '${spanT.round()}s',
-      Offset(leftPad + w - 54, topPad + h + 4),
-      54,
-      TextAlign.right,
-    );
+    if (selectedIndex != null && selectedIndex! >= 0 && selectedIndex! < samples.length) {
+      final sel = samples[selectedIndex!];
+      final sx = leftPad + ((sel.seconds - minT) / spanT) * w;
+      final sy = topPad + h * (1 - (sel.value / maxVal).clamp(0.0, 1.0));
+      canvas.drawLine(
+        Offset(sx, topPad),
+        Offset(sx, topPad + h),
+        Paint()
+          ..color = YarisTheme.red.withValues(alpha: 0.65)
+          ..strokeWidth = 1.2,
+      );
+      canvas.drawCircle(Offset(sx, sy), 5.5, Paint()..color = YarisTheme.paper);
+      canvas.drawCircle(Offset(sx, sy), 3.8, Paint()..color = YarisTheme.red);
+    }
+
+    _drawAxisTimeLabels(canvas, samples, leftPad, topPad + h + 4, w, spanT);
   }
 
   @override
   bool shouldRepaint(covariant _SpeedChartPainter oldDelegate) =>
-      oldDelegate.samples != samples;
+      oldDelegate.samples != samples || oldDelegate.selectedIndex != selectedIndex;
 }
 
 class _AccelerationChartPainter extends CustomPainter {
-  _AccelerationChartPainter(this.samples);
+  _AccelerationChartPainter(this.samples, {this.selectedIndex});
   final List<TripChartSample> samples;
+  final int? selectedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1087,19 +1229,60 @@ class _AccelerationChartPainter extends CustomPainter {
       );
     }
 
-    _drawText(canvas, '0s', Offset(leftPad, topPad + h + 4), 48, TextAlign.left);
-    _drawText(
-      canvas,
-      spanT >= 60 ? '${(spanT / 60).toStringAsFixed(1)}分' : '${spanT.round()}s',
-      Offset(leftPad + w - 54, topPad + h + 4),
-      54,
-      TextAlign.right,
-    );
+    if (selectedIndex != null && selectedIndex! >= 0 && selectedIndex! < samples.length) {
+      final sel = samples[selectedIndex!];
+      final sx = leftPad + ((sel.seconds - minT) / spanT) * w;
+      final sy = zeroY - (sel.value / peak).clamp(-1.0, 1.0) * (h / 2.0);
+      final dotColor = sel.value >= 0 ? YarisTheme.blue : YarisTheme.red;
+      canvas.drawLine(
+        Offset(sx, topPad),
+        Offset(sx, topPad + h),
+        Paint()
+          ..color = dotColor.withValues(alpha: 0.65)
+          ..strokeWidth = 1.2,
+      );
+      canvas.drawCircle(Offset(sx, sy), 5.5, Paint()..color = YarisTheme.paper);
+      canvas.drawCircle(Offset(sx, sy), 3.8, Paint()..color = dotColor);
+    }
+
+    _drawAxisTimeLabels(canvas, samples, leftPad, topPad + h + 4, w, spanT);
   }
 
   @override
   bool shouldRepaint(covariant _AccelerationChartPainter oldDelegate) =>
-      oldDelegate.samples != samples;
+      oldDelegate.samples != samples || oldDelegate.selectedIndex != selectedIndex;
+}
+
+void _drawAxisTimeLabels(
+  Canvas canvas,
+  List<TripChartSample> samples,
+  double leftPad,
+  double y,
+  double w,
+  double spanT,
+) {
+  String fmtClock(DateTime dt) {
+    final l = dt.toLocal();
+    return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
+  }
+
+  final firstTs = samples.first.timestamp;
+  final lastTs = samples.last.timestamp;
+  if (firstTs != null && lastTs != null) {
+    final midTs = firstTs.add(lastTs.difference(firstTs) ~/ 2);
+    _drawText(canvas, fmtClock(firstTs), Offset(leftPad, y), 46, TextAlign.left);
+    _drawText(canvas, fmtClock(midTs), Offset(leftPad + w / 2 - 23, y), 46, TextAlign.center);
+    _drawText(canvas, fmtClock(lastTs), Offset(leftPad + w - 46, y), 46, TextAlign.right);
+  } else {
+    _drawText(canvas, '0s', Offset(leftPad, y), 48, TextAlign.left);
+    _drawText(
+      canvas,
+      spanT >= 60 ? '${(spanT / 60).toStringAsFixed(1)}分' : '${spanT.round()}s',
+      Offset(leftPad + w - 54, y),
+      54,
+      TextAlign.right,
+    );
+  }
 }
 
 void _drawText(

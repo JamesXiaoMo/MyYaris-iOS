@@ -13,6 +13,7 @@ import '../apple_map.dart';
 import '../map_search_page.dart';
 import 'driving_favorites_drawer.dart';
 import 'trips_page.dart';
+import 'vehicle_data_page.dart';
 
 const _muted = YarisTheme.muted;
 
@@ -586,6 +587,32 @@ class _NavigationPageState extends State<NavigationPage> {
                       style: TextStyle(fontSize: 34, fontWeight: FontWeight.w800),
                     ),
                   ),
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('vehicle-data-page-open'),
+                    onPressed: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VehicleDataPage(session: widget.session),
+                      ),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: YarisTheme.rose,
+                      foregroundColor: YarisTheme.red,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    icon: const Icon(Icons.speed_rounded, size: 17),
+                    label: const Text(
+                      '车况',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.tonalIcon(
                     key: const ValueKey('trips-page-open'),
                     onPressed: () => Navigator.push<void>(
