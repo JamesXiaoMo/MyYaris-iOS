@@ -693,6 +693,10 @@ class BackendApi {
     );
   }
 
+  Future<Map<String, dynamic>> fetchTripFootprint() {
+    return call('GET', '/api/v1/trips/footprint');
+  }
+
   Future<Map<String, dynamic>> fetchVehicleState({String? deviceId}) {
     return call(
       'GET',

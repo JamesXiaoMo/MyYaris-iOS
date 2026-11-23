@@ -1,18 +1,24 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../apple_map.dart';
 import '../yaris_theme.dart';
 import 'backend.dart';
+import 'footprint_map_page.dart';
 
 class TripChartSample {
   const TripChartSample({
     required this.seconds,
     required this.value,
     this.timestamp,
+    this.latitude,
+    this.longitude,
   });
   final double seconds;
   final double value;
   final DateTime? timestamp;
+  final double? latitude;
+  final double? longitude;
 }
 
 class TripTelemetrySeries {
@@ -23,6 +29,12 @@ class TripTelemetrySeries {
     required this.avgSpeedKmh,
     required this.maxAccelMs2,
     required this.minAccelMs2,
+    this.hardAccelCount = 0,
+    this.hardBrakeCount = 0,
+    this.smoothCruisePercent = 0.0,
+    this.drivingScore = 0,
+    this.drivingGrade = '—',
+    this.estFuelLPer100Km,
   });
 
   final List<TripChartSample> speedsKmh;
@@ -31,6 +43,12 @@ class TripTelemetrySeries {
   final double? avgSpeedKmh;
   final double? maxAccelMs2;
   final double? minAccelMs2;
+  final int hardAccelCount;
+  final int hardBrakeCount;
+  final double smoothCruisePercent;
+  final int drivingScore;
+  final String drivingGrade;
+  final double? estFuelLPer100Km;
 
   static double _haversineMeters(
     double lat1,
@@ -103,6 +121,8 @@ class TripTelemetrySeries {
             seconds: sec < 0 ? 0 : sec,
             value: v,
             timestamp: p.time,
+            latitude: p.lat,
+            longitude: p.lon,
           ),
         );
       }
@@ -121,6 +141,8 @@ class TripTelemetrySeries {
             seconds: cur.seconds,
             value: a,
             timestamp: cur.timestamp,
+            latitude: cur.latitude,
+            longitude: cur.longitude,
           ),
         );
       }
@@ -152,6 +174,51 @@ class TripTelemetrySeries {
       minAcc = lo;
     }
 
+    // Compute driving score & hybrid smoothness metrics
+    var hardAccel = 0;
+    var hardBrake = 0;
+    var smoothCount = 0;
+    var prevWasHardAccel = false;
+    var prevWasHardBrake = false;
+    for (final a in accels) {
+      if (a.value >= 2.2) {
+        if (!prevWasHardAccel) hardAccel++;
+        prevWasHardAccel = true;
+        prevWasHardBrake = false;
+      } else if (a.value <= -2.5) {
+        if (!prevWasHardBrake) hardBrake++;
+        prevWasHardBrake = true;
+        prevWasHardAccel = false;
+      } else {
+        prevWasHardAccel = false;
+        prevWasHardBrake = false;
+        if (a.value.abs() <= 0.85) smoothCount++;
+      }
+    }
+    final smoothPct = accels.isNotEmpty ? (smoothCount / accels.length) * 100.0 : 0.0;
+    final rawScore = accels.isEmpty
+        ? 0
+        : (100 - hardAccel * 4 - hardBrake * 5 - ((100 - smoothPct) * 0.18).round())
+            .clamp(50, 100);
+    final grade = accels.isEmpty
+        ? '—'
+        : rawScore >= 92
+            ? 'S 丝滑老司机'
+            : rawScore >= 82
+                ? 'A 稳健混动'
+                : rawScore >= 70
+                    ? 'B 轻快节奏'
+                    : 'C 激进驾驶';
+
+    // Yaris Hybrid WLTC heuristic (3.8 L/100km baseline + speed/harshness delta)
+    double? estFuel;
+    if (avgSpd != null && avgSpd >= 1.0) {
+      final highSpeedPenalty = avgSpd > 75 ? (avgSpd - 75) * 0.045 : 0.0;
+      final congestionPenalty = avgSpd < 18 ? (18 - avgSpd) * 0.06 : 0.0;
+      final harshPenalty = (hardAccel + hardBrake) * 0.08;
+      estFuel = (3.7 + highSpeedPenalty + congestionPenalty + harshPenalty).clamp(3.2, 8.5);
+    }
+
     return TripTelemetrySeries(
       speedsKmh: speeds,
       accelsMs2: accels,
@@ -159,6 +226,12 @@ class TripTelemetrySeries {
       avgSpeedKmh: avgSpd,
       maxAccelMs2: maxAcc,
       minAccelMs2: minAcc,
+      hardAccelCount: hardAccel,
+      hardBrakeCount: hardBrake,
+      smoothCruisePercent: smoothPct,
+      drivingScore: rawScore,
+      drivingGrade: grade,
+      estFuelLPer100Km: estFuel,
     );
   }
 }
@@ -286,12 +359,15 @@ class _TripsPageState extends State<TripsPage> {
       final route = <Map<String, double>>[];
       for (final p in rawPoints) {
         if (p is Map && p['latitude'] is num && p['longitude'] is num) {
+          final spd = p['speed_kmh'];
           route.add({
             'latitude': (p['latitude'] as num).toDouble(),
             'longitude': (p['longitude'] as num).toDouble(),
+            if (spd is num && spd.isFinite && spd >= 0) 'speed_kmh': spd.toDouble(),
           });
         }
       }
+      await _mapController.setScrubMarker();
       await _mapController.setRoute(route);
     } catch (e) {
       if (!mounted) return;
@@ -372,6 +448,19 @@ class _TripsPageState extends State<TripsPage> {
       appBar: AppBar(
         title: const Text('行程轨迹'),
         actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => FootprintMapPage(session: widget.session),
+              ),
+            ),
+            icon: const Icon(Icons.map_rounded, size: 17, color: YarisTheme.red),
+            label: const Text(
+              '足迹',
+              style: TextStyle(color: YarisTheme.red, fontWeight: FontWeight.w700),
+            ),
+          ),
           IconButton(
             tooltip: '刷新行程',
             onPressed: _loadingList
@@ -427,7 +516,23 @@ class _TripsPageState extends State<TripsPage> {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+
+            // Speed heatmap legend
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _LegendDot(color: YarisTheme.blue, label: '<25'),
+                SizedBox(width: 10),
+                _LegendDot(color: Color(0xFF1E8E5A), label: '25-55'),
+                SizedBox(width: 10),
+                _LegendDot(color: Color(0xFFEB9414), label: '55-85'),
+                SizedBox(width: 10),
+                _LegendDot(color: Color(0xFFD22A36), label: '>85 km/h'),
+              ],
+            ),
+
+            const SizedBox(height: 10),
 
             // Trip summary metrics
             Container(
@@ -450,6 +555,11 @@ class _TripsPageState extends State<TripsPage> {
 
             // Speed & Acceleration chart card
             _buildTelemetryChartCard(),
+
+            if (_series.drivingScore > 0) ...[
+              const SizedBox(height: 12),
+              _buildDrivingScoreCard(),
+            ],
 
             const SizedBox(height: 12),
 
@@ -750,7 +860,10 @@ class _TripsPageState extends State<TripsPage> {
                   ),
                   const Spacer(),
                   GestureDetector(
-                    onTap: () => setState(() => _scrubSampleIndex = null),
+                    onTap: () {
+                      setState(() => _scrubSampleIndex = null);
+                      unawaited(_mapController.setScrubMarker());
+                    },
                     child: const Icon(Icons.close_rounded, size: 15, color: YarisTheme.muted),
                   ),
                 ],
@@ -811,6 +924,15 @@ class _TripsPageState extends State<TripsPage> {
                         );
                         if (_scrubSampleIndex != idx) {
                           setState(() => _scrubSampleIndex = idx);
+                          final pt = samples[idx];
+                          if (pt.latitude != null && pt.longitude != null) {
+                            unawaited(
+                              _mapController.setScrubMarker(
+                                latitude: pt.latitude,
+                                longitude: pt.longitude,
+                              ),
+                            );
+                          }
                         }
                       }
 
@@ -837,6 +959,78 @@ class _TripsPageState extends State<TripsPage> {
                       );
                     },
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrivingScoreCard() {
+    final score = _series.drivingScore;
+    final accent = score >= 85
+        ? const Color(0xFF1E8E5A)
+        : (score >= 70 ? YarisTheme.blue : YarisTheme.red);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: YarisTheme.paper,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: YarisTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '老司机驾驶报告',
+                style: TextStyle(
+                  color: YarisTheme.ink,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$score 分 · ${_series.drivingGrade}',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _SummaryMetric(
+                label: '平顺滑行',
+                value: '${_series.smoothCruisePercent.round()}%',
+              ),
+              _SummaryMetric(
+                label: '急加速',
+                value: '${_series.hardAccelCount} 次',
+              ),
+              _SummaryMetric(
+                label: '急刹车',
+                value: '${_series.hardBrakeCount} 次',
+              ),
+              _SummaryMetric(
+                label: '估算油耗',
+                value: _series.estFuelLPer100Km != null
+                    ? '${_series.estFuelLPer100Km!.toStringAsFixed(1)} L'
+                    : '—',
+              ),
+            ],
           ),
         ],
       ),
@@ -1301,6 +1495,31 @@ void _drawText(
     textAlign: align,
   )..layout(minWidth: maxWidth, maxWidth: maxWidth);
   tp.paint(canvas, offset);
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(color: YarisTheme.muted, fontSize: 11),
+        ),
+      ],
+    );
+  }
 }
 
 class _SummaryMetric extends StatelessWidget {

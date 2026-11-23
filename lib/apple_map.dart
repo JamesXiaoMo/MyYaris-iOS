@@ -77,6 +77,29 @@ class AppleMapController {
       /* The map may not be ready yet. */
     }
   }
+
+  Future<void> setMultiRoutes(List<List<Map<String, double>>> routes) async {
+    try {
+      await channel?.invokeMethod<void>('setMultiRoutes', routes);
+    } on PlatformException {
+      /* The map may not be ready yet. */
+    }
+  }
+
+  Future<void> setScrubMarker({double? latitude, double? longitude}) async {
+    try {
+      if (latitude == null || longitude == null) {
+        await channel?.invokeMethod<void>('setScrubMarker', null);
+      } else {
+        await channel?.invokeMethod<void>('setScrubMarker', {
+          'latitude': latitude,
+          'longitude': longitude,
+        });
+      }
+    } on PlatformException {
+      /* The map may not be ready yet. */
+    }
+  }
 }
 
 class AppleMap extends StatefulWidget {

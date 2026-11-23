@@ -332,6 +332,12 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
       case "setRoute":
         self.applyRoute(call.arguments as? [[String: Any]] ?? [])
         result(nil)
+      case "setMultiRoutes":
+        self.applyMultiRoutes(call.arguments as? [[[String: Any]]] ?? [])
+        result(nil)
+      case "setScrubMarker":
+        self.applyScrubMarker(call.arguments as? [String: Any])
+        result(nil)
       case "dispose": self.release(); result(nil)
       default: result(FlutterMethodNotImplemented)
       }
@@ -483,20 +489,118 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
       endPin.coordinate = last
       endPin.title = "终点"
       map.addAnnotation(endPin)
-      let polyline = MKPolyline(coordinates: coords, count: coords.count)
-      map.addOverlay(polyline)
-      let rect = polyline.boundingMapRect
+
+      var hasSpeed = false
+      var speeds: [Double] = []
+      for item in rawPoints {
+        guard let lat = (item["latitude"] as? NSNumber)?.doubleValue,
+              let lon = (item["longitude"] as? NSNumber)?.doubleValue else { continue }
+        let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        if lat.isFinite && lon.isFinite && CLLocationCoordinate2DIsValid(c) {
+          if let spd = (item["speed_kmh"] as? NSNumber)?.doubleValue, spd.isFinite {
+            hasSpeed = true
+            speeds.append(spd)
+          } else {
+            speeds.append(-1.0)
+          }
+        }
+      }
+
+      if hasSpeed && speeds.count == coords.count {
+        func tier(_ spd: Double) -> String {
+          if spd < 0 { return "spd_blue" }
+          if spd < 25 { return "spd_blue" }
+          if spd < 55 { return "spd_green" }
+          if spd < 85 { return "spd_amber" }
+          return "spd_red"
+        }
+        var segCoords: [CLLocationCoordinate2D] = [coords[0]]
+        var curTier = tier(speeds[0])
+        for i in 1..<coords.count {
+          let t = tier(speeds[i])
+          segCoords.append(coords[i])
+          if t != curTier || i == coords.count - 1 {
+            let poly = MKPolyline(coordinates: segCoords, count: segCoords.count)
+            poly.title = curTier
+            map.addOverlay(poly)
+            segCoords = [coords[i]]
+            curTier = t
+          }
+        }
+      } else {
+        let polyline = MKPolyline(coordinates: coords, count: coords.count)
+        polyline.title = "spd_blue"
+        map.addOverlay(polyline)
+      }
+
+      let fullPoly = MKPolyline(coordinates: coords, count: coords.count)
+      let rect = fullPoly.boundingMapRect
       let padding = UIEdgeInsets(top: 48, left: 48, bottom: 48, right: 48)
       map.setVisibleMapRect(rect, edgePadding: padding, animated: !UIAccessibility.isReduceMotionEnabled)
     } else if let only = coords.first {
       map.setRegion(MKCoordinateRegion(center: only, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: !UIAccessibility.isReduceMotionEnabled)
     }
   }
+  private var scrubAnnotation: MKPointAnnotation?
+  private func applyScrubMarker(_ data: [String: Any]?) {
+    if let existing = scrubAnnotation {
+      map.removeAnnotation(existing)
+      scrubAnnotation = nil
+    }
+    guard let data = data,
+          let lat = data["latitude"] as? Double,
+          let lon = data["longitude"] as? Double,
+          lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 else { return }
+    let pin = MKPointAnnotation()
+    pin.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    pin.title = "当前回放位置"
+    scrubAnnotation = pin
+    map.addAnnotation(pin)
+  }
+  private func applyMultiRoutes(_ routes: [[[String: Any]]]) {
+    map.removeOverlays(map.overlays)
+    map.removeAnnotations(map.annotations)
+    scrubAnnotation = nil
+    var unionRect = MKMapRect.null
+    for route in routes {
+      var coords: [CLLocationCoordinate2D] = []
+      for item in route {
+        if let lat = item["latitude"] as? Double, let lon = item["longitude"] as? Double, lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 {
+          coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+        }
+      }
+      if coords.count >= 2 {
+        let poly = MKPolyline(coordinates: coords, count: coords.count)
+        poly.title = "footprint"
+        map.addOverlay(poly)
+        unionRect = unionRect.isNull ? poly.boundingMapRect : unionRect.union(poly.boundingMapRect)
+      }
+    }
+    if !unionRect.isNull {
+      let padding = UIEdgeInsets(top: 64, left: 40, bottom: 64, right: 40)
+      map.setVisibleMapRect(unionRect, edgePadding: padding, animated: !UIAccessibility.isReduceMotionEnabled)
+    }
+  }
   func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
     if let polyline = overlay as? MKPolyline {
       let renderer = MKPolylineRenderer(polyline: polyline)
-      renderer.strokeColor = UIColor(red: 53.0/255.0, green: 72.0/255.0, blue: 232.0/255.0, alpha: 0.92)
-      renderer.lineWidth = 4.5
+      switch polyline.title {
+      case "spd_green":
+        renderer.strokeColor = UIColor(red: 30.0/255.0, green: 142.0/255.0, blue: 90.0/255.0, alpha: 0.94)
+        renderer.lineWidth = 4.8
+      case "spd_amber":
+        renderer.strokeColor = UIColor(red: 235.0/255.0, green: 148.0/255.0, blue: 20.0/255.0, alpha: 0.95)
+        renderer.lineWidth = 5.0
+      case "spd_red":
+        renderer.strokeColor = UIColor(red: 210.0/255.0, green: 42.0/255.0, blue: 54.0/255.0, alpha: 0.96)
+        renderer.lineWidth = 5.2
+      case "footprint":
+        renderer.strokeColor = UIColor(red: 168.0/255.0, green: 47.0/255.0, blue: 54.0/255.0, alpha: 0.72)
+        renderer.lineWidth = 4.2
+      default:
+        renderer.strokeColor = UIColor(red: 53.0/255.0, green: 72.0/255.0, blue: 232.0/255.0, alpha: 0.92)
+        renderer.lineWidth = 4.6
+      }
       renderer.lineCap = .round
       renderer.lineJoin = .round
       return renderer
