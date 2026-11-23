@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import '../apple_map.dart';
 import '../yaris_theme.dart';
 import 'backend.dart';
 import 'footprint_map_page.dart';
+import 'trip_share_poster.dart';
 
 class TripChartSample {
   const TripChartSample({
@@ -249,10 +247,7 @@ class TripsPage extends StatefulWidget {
 }
 
 class _TripsPageState extends State<TripsPage> {
-  static const MethodChannel _shareChannel = MethodChannel('io.myyaris/share');
   final AppleMapController _mapController = AppleMapController();
-  final GlobalKey _scoreShareKey = GlobalKey();
-  bool _sharingCard = false;
   List<Map<String, dynamic>> _trips = const [];
   Map<String, dynamic>? _selectedDetail;
   TripTelemetrySeries _series = const TripTelemetrySeries(
@@ -972,33 +967,15 @@ class _TripsPageState extends State<TripsPage> {
   }
 
   Future<void> _shareDrivingReportCard() async {
-    if (_sharingCard) return;
-    setState(() => _sharingCard = true);
-    try {
-      await WidgetsBinding.instance.endOfFrame;
-      final boundary =
-          _scoreShareKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) throw StateError('卡片尚未渲染完成');
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) throw StateError('图片编码失败');
-      final bytes = byteData.buffer.asUint8List();
-      final detail = _selectedDetail;
-      final km = detail?['distance_km'] is num
-          ? (detail!['distance_km'] as num).toStringAsFixed(2)
-          : '0.00';
-      await _shareChannel.invokeMethod<bool>('shareImage', {
-        'bytes': bytes,
-        'text': 'MyYaris 行程报告 · $km km · ${_series.drivingScore}分 (${_series.drivingGrade})',
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('分享图片失败：$e')),
-      );
-    } finally {
-      if (mounted) setState(() => _sharingCard = false);
-    }
+    final detail = _selectedDetail;
+    if (detail == null) return;
+    await showTripSharePosterDialog(
+      context: context,
+      detail: detail,
+      series: _series,
+      formattedDate: _formatLocalTime(detail['started_at']),
+      formattedDuration: _formatDuration(detail['started_at'], detail['ended_at']),
+    );
   }
 
   Widget _buildDrivingScoreCard() {
@@ -1015,132 +992,129 @@ class _TripsPageState extends State<TripsPage> {
         : '—';
     final dateText = detail != null ? _formatLocalTime(detail['started_at']) : '';
 
-    return RepaintBoundary(
-      key: _scoreShareKey,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: YarisTheme.paper,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: YarisTheme.line),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: YarisTheme.red,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'YARIS',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  '老司机驾驶报告',
-                  style: TextStyle(
-                    color: YarisTheme.ink,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                InkWell(
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: YarisTheme.paper,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: YarisTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: YarisTheme.red,
                   borderRadius: BorderRadius.circular(999),
-                  onTap: _sharingCard ? null : _shareDrivingReportCard,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: YarisTheme.periwinkle,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _sharingCard ? Icons.hourglass_top_rounded : Icons.ios_share_rounded,
-                          size: 14,
-                          color: YarisTheme.blue,
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          '分享图片',
-                          style: TextStyle(
-                            color: YarisTheme.blue,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
+                ),
+                child: const Text(
+                  'YARIS',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                '老司机驾驶报告',
+                style: TextStyle(
+                  color: YarisTheme.ink,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: _shareDrivingReportCard,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
+                    color: YarisTheme.periwinkle,
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: Text(
-                    '$score 分 · ${_series.drivingGrade}',
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                    ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.ios_share_rounded,
+                        size: 14,
+                        color: YarisTheme.blue,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        '分享海报',
+                        style: TextStyle(
+                          color: YarisTheme.blue,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '$distText · $durText${dateText.isNotEmpty ? " · $dateText" : ""}',
-                    style: const TextStyle(color: YarisTheme.muted, fontSize: 11.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$score 分 · ${_series.drivingGrade}',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _SummaryMetric(
-                  label: '平顺滑行',
-                  value: '${_series.smoothCruisePercent.round()}%',
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$distText · $durText${dateText.isNotEmpty ? " · $dateText" : ""}',
+                  style: const TextStyle(color: YarisTheme.muted, fontSize: 11.5),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                _SummaryMetric(
-                  label: '急加速',
-                  value: '${_series.hardAccelCount} 次',
-                ),
-                _SummaryMetric(
-                  label: '急刹车',
-                  value: '${_series.hardBrakeCount} 次',
-                ),
-                _SummaryMetric(
-                  label: '估算油耗',
-                  value: _series.estFuelLPer100Km != null
-                      ? '${_series.estFuelLPer100Km!.toStringAsFixed(1)} L'
-                      : '—',
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _SummaryMetric(
+                label: '平顺滑行',
+                value: '${_series.smoothCruisePercent.round()}%',
+              ),
+              _SummaryMetric(
+                label: '急加速',
+                value: '${_series.hardAccelCount} 次',
+              ),
+              _SummaryMetric(
+                label: '急刹车',
+                value: '${_series.hardBrakeCount} 次',
+              ),
+              _SummaryMetric(
+                label: '估算油耗',
+                value: _series.estFuelLPer100Km != null
+                    ? '${_series.estFuelLPer100Km!.toStringAsFixed(1)} L'
+                    : '—',
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
