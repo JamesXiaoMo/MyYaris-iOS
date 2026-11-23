@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'car_model.dart';
 import 'glass_tab_bar.dart';
+import 'splash_screen.dart';
 import 'yaris_theme.dart';
 import 'verification/favorites_evidence.dart';
 import 'verification/home_evidence.dart';
@@ -50,7 +51,10 @@ class _MyYarisAppState extends State<MyYarisApp> {
     title: 'MyYaris',
     builder: (context, child) => RepaintBoundary(
       key: evidenceBoundary,
-      child: AuthenticationGate(session: session, child: child!),
+      child: YarisSplashOverlay(
+        session: session,
+        child: AuthenticationGate(session: session, child: child!),
+      ),
     ),
     debugShowCheckedModeBanner: false,
     theme: YarisTheme.light,

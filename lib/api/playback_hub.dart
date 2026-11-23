@@ -1331,7 +1331,7 @@ class PlaybackHub extends ChangeNotifier {
       return LocalQueue.single(track);
     }
 
-    if (source == 'single_track') {
+    if (source == 'single_track' || source == 'dj_queue' || source == 'ai_queue') {
       final q = single('正在让本机准备…');
       if (carMode == 'single_loop') q.mode = 'single_loop';
       return (q, 0);

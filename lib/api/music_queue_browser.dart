@@ -331,6 +331,10 @@ class _MusicQueueBrowserState extends State<MusicQueueBrowser> {
         Text(
           first?.source == 'netease_intelligence'
               ? '网易云心动'
+              : first?.source == 'dj_queue'
+              ? '扫码点歌队列'
+              : first?.source == 'ai_queue'
+              ? 'AI 语音歌单'
               : first?.source == 'single_track'
               ? '临时单曲'
               : '我喜欢的音乐',

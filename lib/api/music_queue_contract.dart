@@ -18,6 +18,8 @@ class MusicQueuePage {
     'netease_favorite',
     'netease_intelligence',
     'single_track',
+    'dj_queue',
+    'ai_queue',
   };
   final String id, source;
   final int version, total, offset, limit;
