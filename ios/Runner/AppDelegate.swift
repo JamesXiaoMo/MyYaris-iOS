@@ -27,6 +27,150 @@ import UniformTypeIdentifiers
     localAudio = YarisLocalAudio(messenger: engineBridge.applicationRegistrar.messenger())
     let shareChannel = FlutterMethodChannel(name: "io.myyaris/share", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     shareChannel.setMethodCallHandler { call, result in
+      if call.method == "renderSatelliteRouteSnapshot" {
+        guard let args = call.arguments as? [String: Any],
+              let rawPoints = args["points"] as? [[String: Any]] else {
+          result(nil)
+          return
+        }
+        let width = (args["width"] as? NSNumber)?.doubleValue ?? 300.0
+        let height = (args["height"] as? NSNumber)?.doubleValue ?? 168.0
+        var parsed: [(coord: CLLocationCoordinate2D, speed: Double)] = []
+        parsed.reserveCapacity(rawPoints.count)
+        for item in rawPoints {
+          guard let latNum = item["lat"] as? NSNumber,
+                let lngNum = item["lng"] as? NSNumber else { continue }
+          let lat = latNum.doubleValue
+          let lng = lngNum.doubleValue
+          if !lat.isFinite || !lng.isFinite || (lat == 0 && lng == 0) { continue }
+          let spd = (item["speed_kmh"] as? NSNumber)?.doubleValue ?? 0.0
+          parsed.append((CLLocationCoordinate2D(latitude: lat, longitude: lng), spd))
+        }
+        guard parsed.count >= 2 else {
+          result(nil)
+          return
+        }
+        var minLat = parsed[0].coord.latitude
+        var maxLat = minLat
+        var minLng = parsed[0].coord.longitude
+        var maxLng = minLng
+        for p in parsed {
+          minLat = min(minLat, p.coord.latitude)
+          maxLat = max(maxLat, p.coord.latitude)
+          minLng = min(minLng, p.coord.longitude)
+          maxLng = max(maxLng, p.coord.longitude)
+        }
+        let center = CLLocationCoordinate2D(
+          latitude: (minLat + maxLat) / 2.0,
+          longitude: (minLng + maxLng) / 2.0
+        )
+        let span = MKCoordinateSpan(
+          latitudeDelta: max((maxLat - minLat) * 1.45, 0.0045),
+          longitudeDelta: max((maxLng - minLng) * 1.45, 0.0045)
+        )
+        let options = MKMapSnapshotter.Options()
+        options.region = MKCoordinateRegion(center: center, span: span)
+        options.size = CGSize(width: width, height: height)
+        options.scale = 3.0
+        options.mapType = .satellite
+        options.showsBuildings = true
+
+        let snapshotter = MKMapSnapshotter(options: options)
+        snapshotter.start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, error in
+          guard let snapshot = snapshot, error == nil else {
+            DispatchQueue.main.async { result(nil) }
+            return
+          }
+          let format = UIGraphicsImageRendererFormat()
+          format.scale = 3.0
+          format.opaque = true
+          let renderer = UIGraphicsImageRenderer(size: options.size, format: format)
+          let finalImage = renderer.image { ctx in
+            let cg = ctx.cgContext
+            snapshot.image.draw(at: .zero)
+
+            // Subtle dark editorial vignette so the glowing speed route pops cleanly
+            let bounds = CGRect(origin: .zero, size: options.size)
+            cg.setFillColor(UIColor(red: 8/255, green: 13/255, blue: 24/255, alpha: 0.28).cgColor)
+            cg.fill(bounds)
+
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let gradColors = [
+              UIColor(red: 8/255, green: 13/255, blue: 24/255, alpha: 0.48).cgColor,
+              UIColor(red: 8/255, green: 13/255, blue: 24/255, alpha: 0.0).cgColor,
+              UIColor(red: 8/255, green: 13/255, blue: 24/255, alpha: 0.52).cgColor
+            ] as CFArray
+            if let grad = CGGradient(colorsSpace: colorSpace, colors: gradColors, locations: [0.0, 0.5, 1.0]) {
+              cg.drawLinearGradient(
+                grad,
+                start: CGPoint(x: 0, y: 0),
+                end: CGPoint(x: 0, y: options.size.height),
+                options: []
+              )
+            }
+
+            let pts = parsed.map { snapshot.point(for: $0.coord) }
+
+            func speedColor(_ kmh: Double) -> UIColor {
+              if kmh < 25 { return UIColor(red: 53/255, green: 72/255, blue: 232/255, alpha: 1.0) }
+              if kmh < 55 { return UIColor(red: 25/255, green: 179/255, blue: 107/255, alpha: 1.0) }
+              if kmh < 85 { return UIColor(red: 235/255, green: 148/255, blue: 20/255, alpha: 1.0) }
+              return UIColor(red: 230/255, green: 57/255, blue: 70/255, alpha: 1.0)
+            }
+
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+
+            // Outer glow pass
+            for i in 1..<pts.count {
+              let segColor = speedColor((parsed[i - 1].speed + parsed[i].speed) * 0.5)
+              cg.setStrokeColor(segColor.withAlphaComponent(0.32).cgColor)
+              cg.setLineWidth(7.5)
+              cg.beginPath()
+              cg.move(to: pts[i - 1])
+              cg.addLine(to: pts[i])
+              cg.strokePath()
+            }
+
+            // Crisp core route pass
+            for i in 1..<pts.count {
+              let segColor = speedColor((parsed[i - 1].speed + parsed[i].speed) * 0.5)
+              cg.setStrokeColor(segColor.cgColor)
+              cg.setLineWidth(3.4)
+              cg.beginPath()
+              cg.move(to: pts[i - 1])
+              cg.addLine(to: pts[i])
+              cg.strokePath()
+            }
+
+            // Start & End glowing markers
+            func drawEndpoint(_ pt: CGPoint, color: UIColor) {
+              cg.setFillColor(color.withAlphaComponent(0.32).cgColor)
+              cg.fillEllipse(in: CGRect(x: pt.x - 8, y: pt.y - 8, width: 16, height: 16))
+              cg.setFillColor(UIColor.white.cgColor)
+              cg.fillEllipse(in: CGRect(x: pt.x - 4.8, y: pt.y - 4.8, width: 9.6, height: 9.6))
+              cg.setFillColor(color.cgColor)
+              cg.fillEllipse(in: CGRect(x: pt.x - 3.2, y: pt.y - 3.2, width: 6.4, height: 6.4))
+            }
+            if let first = pts.first {
+              drawEndpoint(first, color: UIColor(red: 25/255, green: 179/255, blue: 107/255, alpha: 1.0))
+            }
+            if let last = pts.last {
+              drawEndpoint(last, color: UIColor(red: 230/255, green: 57/255, blue: 70/255, alpha: 1.0))
+            }
+          }
+          let png = finalImage.pngData()
+          DispatchQueue.main.async {
+            if let data = png {
+              result(FlutterStandardTypedData(bytes: data))
+            } else {
+              result(nil)
+            }
+          }
+        }
+        return
+      }
+
       guard call.method == "shareImage",
             let args = call.arguments as? [String: Any],
             let typed = args["bytes"] as? FlutterStandardTypedData,

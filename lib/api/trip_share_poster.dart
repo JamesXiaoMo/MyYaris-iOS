@@ -48,6 +48,57 @@ class _TripSharePosterDialogState extends State<_TripSharePosterDialog> {
   static const MethodChannel _shareChannel = MethodChannel('io.myyaris/share');
   final GlobalKey _posterKey = GlobalKey();
   bool _exporting = false;
+  bool _loadingMap = true;
+  Uint8List? _satelliteSnapshot;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSatelliteSnapshot();
+  }
+
+  Future<void> _loadSatelliteSnapshot() async {
+    final rawPts = widget.detail['points'] is List
+        ? widget.detail['points'] as List
+        : const [];
+    final compact = <Map<String, double>>[];
+    final step = rawPts.length > 360 ? (rawPts.length / 360).ceil() : 1;
+    for (var i = 0; i < rawPts.length; i += step) {
+      final item = rawPts[i];
+      if (item is! Map) continue;
+      final lat = item['lat'];
+      final lng = item['lng'];
+      if (lat is! num || lng is! num) continue;
+      final spd = item['speed_kmh'] is num
+          ? (item['speed_kmh'] as num).toDouble()
+          : 0.0;
+      compact.add({
+        'lat': lat.toDouble(),
+        'lng': lng.toDouble(),
+        'speed_kmh': spd,
+      });
+    }
+    if (compact.length < 2) {
+      if (mounted) setState(() => _loadingMap = false);
+      return;
+    }
+    try {
+      final bytes = await _shareChannel
+          .invokeMethod<Uint8List>('renderSatelliteRouteSnapshot', {
+            'points': compact,
+            'width': 300.0,
+            'height': 168.0,
+          })
+          .timeout(const Duration(seconds: 7));
+      if (!mounted) return;
+      setState(() {
+        _satelliteSnapshot = bytes;
+        _loadingMap = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMap = false);
+    }
+  }
 
   Future<void> _exportAndShare() async {
     if (_exporting) return;
@@ -105,6 +156,8 @@ class _TripSharePosterDialogState extends State<_TripSharePosterDialog> {
                   dateText: widget.formattedDate,
                   series: widget.series,
                   rawPoints: rawPts,
+                  satelliteSnapshot: _satelliteSnapshot,
+                  loadingMap: _loadingMap,
                 ),
               ),
             ),
@@ -160,6 +213,8 @@ class _YarisDrivingPoster extends StatelessWidget {
     required this.dateText,
     required this.series,
     required this.rawPoints,
+    this.satelliteSnapshot,
+    this.loadingMap = false,
   });
 
   final double distanceKm;
@@ -167,6 +222,8 @@ class _YarisDrivingPoster extends StatelessWidget {
   final String dateText;
   final TripTelemetrySeries series;
   final List<dynamic> rawPoints;
+  final Uint8List? satelliteSnapshot;
+  final bool loadingMap;
 
   @override
   Widget build(BuildContext context) {
@@ -325,31 +382,40 @@ class _YarisDrivingPoster extends StatelessWidget {
             ),
             const SizedBox(height: 14),
 
-            // Stylized glowing Route Track Silhouette Box
+            // Real Apple Satellite Map + Glowing Speed-Heatmap Route Box
             Container(
-              height: 126,
-              padding: const EdgeInsets.all(12),
+              height: 168,
               decoration: BoxDecoration(
                 color: const Color(0xFF0A0F1B),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFF202B44)),
+                border: Border.all(color: const Color(0xFF283655)),
               ),
+              clipBehavior: Clip.antiAlias,
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: CustomPaint(
-                      painter: _RouteSilhouettePainter(rawPoints),
-                    ),
+                    child: satelliteSnapshot != null
+                        ? Image.memory(
+                            satelliteSnapshot!,
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: CustomPaint(
+                              painter: _RouteSilhouettePainter(rawPoints),
+                            ),
+                          ),
                   ),
                   Positioned(
-                    left: 0,
-                    top: 0,
+                    left: 10,
+                    top: 10,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                       decoration: BoxDecoration(
-                        color: scoreColor.withValues(alpha: 0.16),
+                        color: const Color(0xFF0A0F1B).withValues(alpha: 0.72),
                         borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: scoreColor.withValues(alpha: 0.55)),
+                        border: Border.all(color: scoreColor.withValues(alpha: 0.72)),
                       ),
                       child: Text(
                         series.drivingGrade,
@@ -361,16 +427,43 @@ class _YarisDrivingPoster extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (loadingMap && satelliteSnapshot == null)
+                    Positioned(
+                      right: 10,
+                      top: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A0F1B).withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          '加载卫星图…',
+                          style: TextStyle(
+                            color: Color(0xFFB4C2DC),
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   if (series.maxSpeedKmh != null)
                     Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Text(
-                        '极速 ${series.maxSpeedKmh!.toStringAsFixed(1)} km/h',
-                        style: const TextStyle(
-                          color: Color(0xFF7D8DAA),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
+                      right: 10,
+                      bottom: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0A0F1B).withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '极速 ${series.maxSpeedKmh!.toStringAsFixed(1)} km/h',
+                          style: const TextStyle(
+                            color: Color(0xFFD6E0F2),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
