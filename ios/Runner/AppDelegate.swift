@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDocumentPickerDelegate {
   private var audioPickerResult: FlutterResult?
   private var localAudio: YarisLocalAudio?
+  private var activeSnapshotter: MKMapSnapshotter?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -72,13 +73,19 @@ import UniformTypeIdentifiers
         options.region = MKCoordinateRegion(center: center, span: span)
         options.size = CGSize(width: width, height: height)
         options.scale = 3.0
-        options.mapType = .satellite
-        options.showsBuildings = true
+        if #available(iOS 17.0, *) {
+          options.preferredConfiguration = MKImageryMapConfiguration(elevationStyle: .flat)
+        } else {
+          options.mapType = .satellite
+        }
 
+        self.activeSnapshotter?.cancel()
         let snapshotter = MKMapSnapshotter(options: options)
-        snapshotter.start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, error in
+        self.activeSnapshotter = snapshotter
+        snapshotter.start(with: DispatchQueue.main) { [weak self] snapshot, error in
+          self?.activeSnapshotter = nil
           guard let snapshot = snapshot, error == nil else {
-            DispatchQueue.main.async { result(nil) }
+            result(nil)
             return
           }
           let format = UIGraphicsImageRendererFormat()

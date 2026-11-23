@@ -66,12 +66,12 @@ class _TripSharePosterDialogState extends State<_TripSharePosterDialog> {
     for (var i = 0; i < rawPts.length; i += step) {
       final item = rawPts[i];
       if (item is! Map) continue;
-      final lat = item['lat'];
-      final lng = item['lng'];
+      final lat = item['latitude'] ?? item['lat'];
+      final lng = item['longitude'] ?? item['lng'];
       if (lat is! num || lng is! num) continue;
       final spd = item['speed_kmh'] is num
           ? (item['speed_kmh'] as num).toDouble()
-          : 0.0;
+          : 20.0;
       compact.add({
         'lat': lat.toDouble(),
         'lng': lng.toDouble(),
