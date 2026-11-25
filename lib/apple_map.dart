@@ -70,7 +70,13 @@ class AppleMapController {
     }
   }
 
+  List<Map<String, double>>? _pendingRoute;
+  List<List<Map<String, double>>>? _pendingMultiRoutes;
+  Map<String, double>? _pendingScrubMarker;
+
   Future<void> setRoute(List<Map<String, double>> points) async {
+    _pendingRoute = points;
+    _pendingMultiRoutes = null;
     try {
       await channel?.invokeMethod<void>('setRoute', points);
     } on PlatformException {
@@ -79,6 +85,8 @@ class AppleMapController {
   }
 
   Future<void> setMultiRoutes(List<List<Map<String, double>>> routes) async {
+    _pendingMultiRoutes = routes;
+    _pendingRoute = null;
     try {
       await channel?.invokeMethod<void>('setMultiRoutes', routes);
     } on PlatformException {
@@ -98,15 +106,13 @@ class AppleMapController {
   }
 
   Future<void> setScrubMarker({double? latitude, double? longitude}) async {
+    if (latitude == null || longitude == null) {
+      _pendingScrubMarker = null;
+    } else {
+      _pendingScrubMarker = {'latitude': latitude, 'longitude': longitude};
+    }
     try {
-      if (latitude == null || longitude == null) {
-        await channel?.invokeMethod<void>('setScrubMarker', null);
-      } else {
-        await channel?.invokeMethod<void>('setScrubMarker', {
-          'latitude': latitude,
-          'longitude': longitude,
-        });
-      }
+      await channel?.invokeMethod<void>('setScrubMarker', _pendingScrubMarker);
     } on PlatformException {
       /* The map may not be ready yet. */
     }
@@ -243,6 +249,20 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
     if (pendingPins != null) {
       channel!.invokeMethod<void>('setFavoritePins', pendingPins);
     }
+    final pendingRoute = widget.controller?._pendingRoute;
+    final pendingMulti = widget.controller?._pendingMultiRoutes;
+    final hasRouteOverlay =
+        (pendingRoute != null && pendingRoute.isNotEmpty) ||
+        (pendingMulti != null && pendingMulti.isNotEmpty);
+    if (pendingRoute != null && pendingRoute.isNotEmpty) {
+      channel!.invokeMethod<void>('setRoute', pendingRoute);
+    } else if (pendingMulti != null && pendingMulti.isNotEmpty) {
+      channel!.invokeMethod<void>('setMultiRoutes', pendingMulti);
+    }
+    final pendingScrub = widget.controller?._pendingScrubMarker;
+    if (pendingScrub != null) {
+      channel!.invokeMethod<void>('setScrubMarker', pendingScrub);
+    }
     channel!.setMethodCallHandler((call) async {
       if (!mounted) return;
       if (call.method == 'selected' && call.arguments is Map) {
@@ -288,8 +308,10 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
     });
     center();
     updateActive();
-    // A one-shot foreground request; iOS owns the first-use permission dialog.
-    unawaited(locate(automatic: true));
+    // Skip auto-centering on user location if a trip/footprint route is already active.
+    if (!hasRouteOverlay) {
+      unawaited(locate(automatic: true));
+    }
   }
 
   void center() {

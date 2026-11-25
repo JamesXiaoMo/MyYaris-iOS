@@ -698,8 +698,58 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     }
   }
 
+  private final class CarPin: MKPointAnnotation {}
+
+  private static func buildCarMarkerImage() -> UIImage {
+    let size = CGSize(width: 36, height: 36)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    return renderer.image { ctx in
+      let cg = ctx.cgContext
+      let circleRect = CGRect(x: 2, y: 2, width: 32, height: 32)
+      cg.saveGState()
+      cg.setShadow(
+        offset: CGSize(width: 0, height: 1.5),
+        blur: 4.0,
+        color: UIColor.black.withAlphaComponent(0.28).cgColor
+      )
+      cg.setFillColor(UIColor.white.cgColor)
+      cg.fillEllipse(in: circleRect)
+      cg.restoreGState()
+
+      cg.setStrokeColor(UIColor(red: 53.0/255.0, green: 72.0/255.0, blue: 232.0/255.0, alpha: 0.95).cgColor)
+      cg.setLineWidth(2.2)
+      cg.strokeEllipse(in: circleRect)
+
+      let attrs: [NSAttributedString.Key: Any] = [
+        .font: UIFont.systemFont(ofSize: 19)
+      ]
+      let text = "🚗" as NSString
+      let textSize = text.size(withAttributes: attrs)
+      let textOrigin = CGPoint(
+        x: (size.width - textSize.width) / 2.0,
+        y: (size.height - textSize.height) / 2.0
+      )
+      text.draw(at: textOrigin, withAttributes: attrs)
+    }
+  }
+
+  private lazy var carMarkerImage: UIImage = YarisMapView.buildCarMarkerImage()
+
   func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
     if annotation is MKUserLocation { return nil }
+    if let carPin = annotation as? CarPin {
+      let reuseId = "yaris_car_scrub_pin"
+      let view = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId)
+        ?? MKAnnotationView(annotation: carPin, reuseIdentifier: reuseId)
+      view.annotation = carPin
+      view.image = carMarkerImage
+      view.centerOffset = .zero
+      view.canShowCallout = false
+      view.displayPriority = .required
+      view.zPriority = .max
+      view.collisionMode = .none
+      return view
+    }
     if let place = annotation as? YarisPlacePin {
       let reuseId = "yaris_favorite_pin"
       let view = (mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView)
@@ -755,8 +805,13 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
   }
   private func applyRoute(_ rawPoints: [[String: Any]]) {
+    cameraEpoch += 1
+    let activeScrub = scrubAnnotation
     map.removeOverlays(map.overlays)
-    map.removeAnnotations(map.annotations)
+    let nonScrub = map.annotations.filter { !($0 is MKUserLocation) && ($0 as AnyObject) !== activeScrub }
+    if !nonScrub.isEmpty {
+      map.removeAnnotations(nonScrub)
+    }
     var coords: [CLLocationCoordinate2D] = []
     for item in rawPoints {
       guard let lat = (item["latitude"] as? NSNumber)?.doubleValue,
@@ -830,23 +885,41 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
       map.setRegion(MKCoordinateRegion(center: only, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: !UIAccessibility.isReduceMotionEnabled)
     }
   }
-  private var scrubAnnotation: MKPointAnnotation?
+  private var scrubAnnotation: CarPin?
   private func applyScrubMarker(_ data: [String: Any]?) {
-    if let existing = scrubAnnotation {
-      map.removeAnnotation(existing)
-      scrubAnnotation = nil
-    }
     guard let data = data,
-          let lat = data["latitude"] as? Double,
-          let lon = data["longitude"] as? Double,
-          lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 else { return }
-    let pin = MKPointAnnotation()
-    pin.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-    pin.title = "当前回放位置"
-    scrubAnnotation = pin
-    map.addAnnotation(pin)
+          let lat = (data["latitude"] as? NSNumber)?.doubleValue,
+          let lon = (data["longitude"] as? NSNumber)?.doubleValue,
+          lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 else {
+      if let existing = scrubAnnotation {
+        map.removeAnnotation(existing)
+        scrubAnnotation = nil
+      }
+      return
+    }
+    let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    if let existing = scrubAnnotation {
+      existing.coordinate = coord
+    } else {
+      let pin = CarPin()
+      pin.coordinate = coord
+      pin.title = "当前回放位置"
+      scrubAnnotation = pin
+      map.addAnnotation(pin)
+    }
+    // Keep the car icon inside the visible map viewport if user panned/zoomed away.
+    let mapPt = MKMapPoint(coord)
+    let visible = map.visibleMapRect
+    if !visible.isNull && visible.size.width > 0 && visible.size.height > 0 {
+      let insetRect = visible.insetBy(dx: visible.size.width * 0.08, dy: visible.size.height * 0.08)
+      if !insetRect.contains(mapPt) {
+        cameraEpoch += 1
+        map.setCenter(coord, animated: false)
+      }
+    }
   }
   private func applyMultiRoutes(_ routes: [[[String: Any]]]) {
+    cameraEpoch += 1
     map.removeOverlays(map.overlays)
     map.removeAnnotations(map.annotations)
     scrubAnnotation = nil

@@ -478,9 +478,12 @@ class _TripsPageState extends State<TripsPage> {
         onRefresh: () async {
           await Future.wait([_loadTrips(), _loadDailyStats(_mileageDays)]);
         },
-        child: ListView(
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-          children: [
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             // Apple Map route card
             ClipRRect(
               borderRadius: BorderRadius.circular(22),
@@ -614,6 +617,7 @@ class _TripsPageState extends State<TripsPage> {
                 const SizedBox(height: 8),
               ],
           ],
+          ),
         ),
       ),
     );
