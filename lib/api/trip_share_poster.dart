@@ -494,10 +494,11 @@ class _YarisDrivingPoster extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 _PosterTile(
-                  value: series.estFuelLPer100Km != null
-                      ? '${series.estFuelLPer100Km!.toStringAsFixed(1)}L'
+                  value: series.estFuelLPer100Km != null &&
+                          series.estFuelLPer100Km! > 0
+                      ? (100.0 / series.estFuelLPer100Km!).toStringAsFixed(1)
                       : '—',
-                  label: '百公里估算',
+                  label: '估算 km/L',
                   accent: const Color(0xFFFFB732),
                 ),
               ],

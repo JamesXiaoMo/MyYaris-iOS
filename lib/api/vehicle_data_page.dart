@@ -210,10 +210,10 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
                 () {
                   final dist = s?['trip_distance_km'];
                   final used = s?['total_fuel_consumed_liters'];
-                  if (dist is num && used is num && dist >= 0.3 && used >= 0) {
-                    final avg = (used / dist) * 100.0;
-                    if (avg >= 0.5 && avg <= 30.0) {
-                      return '${avg.toStringAsFixed(1)} L/100km';
+                  if (dist is num && used is num && dist >= 0.3 && used > 0.005) {
+                    final kmPerL = dist / used;
+                    if (kmPerL >= 3.0 && kmPerL <= 80.0) {
+                      return '${kmPerL.toStringAsFixed(1)} km/L';
                     }
                   }
                   return '—';

@@ -1108,8 +1108,9 @@ class _TripsPageState extends State<TripsPage> {
               ),
               _SummaryMetric(
                 label: '估算油耗',
-                value: _series.estFuelLPer100Km != null
-                    ? '${_series.estFuelLPer100Km!.toStringAsFixed(1)} L'
+                value: _series.estFuelLPer100Km != null &&
+                        _series.estFuelLPer100Km! > 0
+                    ? '${(100.0 / _series.estFuelLPer100Km!).toStringAsFixed(1)} km/L'
                     : '—',
               ),
             ],
