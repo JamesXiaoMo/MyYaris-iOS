@@ -205,6 +205,21 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
               ('预估续航', _fmtNum(s?['estimated_range_km'], digits: 0, unit: 'km')),
               ('整车总里程', _fmtNum(s?['total_odometer_km'], digits: 1, unit: 'km')),
               ('本次行程里程', _fmtNum(s?['trip_distance_km'], digits: 2, unit: 'km')),
+              (
+                '实测平均油耗',
+                () {
+                  final dist = s?['trip_distance_km'];
+                  final used = s?['total_fuel_consumed_liters'];
+                  if (dist is num && used is num && dist >= 0.3 && used >= 0) {
+                    final avg = (used / dist) * 100.0;
+                    if (avg >= 0.5 && avg <= 30.0) {
+                      return '${avg.toStringAsFixed(1)} L/100km';
+                    }
+                  }
+                  return '—';
+                }(),
+              ),
+              ('本趟累计耗油', _fmtNum(s?['total_fuel_consumed_liters'], digits: 2, unit: 'L')),
               ('瞬时油耗率', _fmtNum(s?['fuel_rate_l_h'], digits: 2, unit: 'L/h')),
             ]),
 
