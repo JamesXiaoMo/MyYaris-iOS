@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'car_model.dart';
 import 'glass_tab_bar.dart';
 import 'splash_screen.dart';
@@ -7,9 +8,11 @@ import 'verification/favorites_evidence.dart';
 import 'verification/home_evidence.dart';
 import 'verification/music_diagnostic.dart';
 import 'api/backend.dart';
+import 'api/music_home.dart' show MusicArtwork;
 import 'api/music_queue_browser.dart';
 import 'api/pages.dart';
 import 'api/login_page.dart';
+import 'api/vehicle_data_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +21,9 @@ const _muted = YarisTheme.muted;
 const _homeAccent = YarisTheme.blue;
 const _homeSurface = YarisTheme.paper;
 const _homeBorder = YarisTheme.line;
+const _parkingGreen = Color(0xFF157A58);
+const _parkingMint = Color(0xFFE6F6EE);
+const _homeNativeChannel = MethodChannel('io.myyaris/share');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -314,89 +320,413 @@ class _HomePage extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: onDriving,
-                icon: const Icon(CupertinoIcons.location_north_fill),
-                label: const Text('找目的地'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: onMusic,
-                icon: const Icon(CupertinoIcons.music_note),
-                label: const Text('打开音乐'),
-              ),
-            ],
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final tileSize = ((constraints.maxWidth - 12) / 2)
+                  .clamp(132.0, 210.0)
+                  .toDouble();
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: tileSize),
+                        child: _fuelRangeCard(context),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: tileSize),
+                        child: _parkingNavCard(context),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           const SizedBox(height: 12),
           _musicCard(),
-          const SizedBox(height: 12),
-          _destinationCard(),
         ],
       ),
     );
   }
 
-  BoxDecoration get _card => BoxDecoration(
-    color: _homeSurface,
-    borderRadius: BorderRadius.circular(24),
-    border: Border.all(color: _homeBorder),
-  );
+  Future<void> _openParkingInGoogleMaps(BuildContext context) async {
+    final parking = session.homeParking;
+    final lat = parking?['latitude'];
+    final lng = parking?['longitude'];
+    if (lat is! num || lng is! num || !lat.isFinite || !lng.isFinite) {
+      unawaited(session.refreshVehicleState(force: true));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('暂未记录到停车位置，待车机熄火上报后即可导航')),
+        );
+      }
+      return;
+    }
+    try {
+      final ok = await _homeNativeChannel.invokeMethod<bool>(
+        'openGoogleMapsNavigation',
+        {
+          'lat': lat.toDouble(),
+          'lng': lng.toDouble(),
+          'mode': 'walking',
+        },
+      );
+      if (ok != true && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法打开 Google 地图，请确认系统浏览器或地图应用可用')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('唤起 Google 地图失败，请稍后重试')),
+        );
+      }
+    }
+  }
 
-  Widget _musicCard() => DecoratedBox(
-    decoration: _card,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  String _formatParkedSubtitle(Map<String, dynamic>? parking) {
+    if (parking == null) return '暂无停车记录';
+    final rawTime = parking['parked_at']?.toString();
+    final dt = rawTime != null ? DateTime.tryParse(rawTime)?.toLocal() : null;
+    if (dt != null) {
+      final now = DateTime.now();
+      final hh = dt.hour.toString().padLeft(2, '0');
+      final mm = dt.minute.toString().padLeft(2, '0');
+      final isToday =
+          dt.year == now.year && dt.month == now.month && dt.day == now.day;
+      if (isToday) return '$hh:$mm 停放';
+      return '${dt.month}/${dt.day} $hh:$mm 停放';
+    }
+    final lat = parking['latitude'];
+    final lng = parking['longitude'];
+    if (lat is num && lng is num) return '已记录停车坐标';
+    return '暂无停车记录';
+  }
+
+  Widget _fuelRangeCard(BuildContext context) {
+    final pct = session.homeFuelPercent;
+    final liters = session.homeFuelLiters;
+    final rangeKm = session.homeEstimatedRangeKm;
+    final kmPerL = session.homeAvgKmPerL;
+    final lowFuel = pct != null && pct < 20.0;
+    final ringColor = lowFuel ? YarisTheme.red : _homeAccent;
+    final rangeText = rangeKm != null
+        ? '剩余约 ${rangeKm.round()} km'
+        : (liters != null ? '剩余 ${liters.toStringAsFixed(1)} L' : '油量待采集');
+    final subText = kmPerL != null
+        ? '${kmPerL.toStringAsFixed(1)} km/L'
+        : '点击查看车况';
+
+    return Material(
+      color: _homeSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: const BorderSide(color: _homeBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: const ValueKey('home-fuel-card'),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => VehicleDataPage(session: session),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _sectionIcon(CupertinoIcons.music_note),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.homeMusicState,
-                      style: const TextStyle(
-                        color: _homeAccent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      session.homeMusicTitle,
-                      maxLines: 2,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '油量与续航',
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 18,
+                      style: TextStyle(
+                        color: ringColor,
+                        fontSize: 12,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (session.homeMusicDetail.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        session.homeMusicDetail,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: _muted),
+                  ),
+                  const Icon(
+                    CupertinoIcons.chevron_right,
+                    size: 13,
+                    color: _muted,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: SizedBox(
+                  width: 76,
+                  height: 76,
+                  child: CustomPaint(
+                    painter: _FuelRingPainter(
+                      fraction: pct != null ? (pct / 100.0) : null,
+                      activeColor: ringColor,
+                      trackColor: lowFuel
+                          ? YarisTheme.rose
+                          : YarisTheme.periwinkle,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.local_gas_station_rounded,
+                              size: 15,
+                              color: ringColor,
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              pct != null ? '${pct.round()}%' : '--%',
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: YarisTheme.ink,
+                                height: 1.05,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                rangeText,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: YarisTheme.ink,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subText,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: _muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _parkingNavCard(BuildContext context) {
+    final parking = session.homeParking;
+    final hasCoords =
+        parking?['latitude'] is num && parking?['longitude'] is num;
+    final subtitle = _formatParkedSubtitle(parking);
+
+    return Material(
+      color: _homeSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: const BorderSide(color: _homeBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: const ValueKey('home-parking-card'),
+        onTap: () => _openParkingInGoogleMaps(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _parkingMint,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Icon(
+                      Icons.local_parking_rounded,
+                      size: 21,
+                      color: _parkingGreen,
+                    ),
+                  ),
+                  const Spacer(),
+                  const Icon(
+                    CupertinoIcons.arrow_up_right,
+                    size: 15,
+                    color: _muted,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: hasCoords ? _parkingGreen : YarisTheme.neutral,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '最后停车点',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: hasCoords ? Colors.white : _muted,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                '导航寻车',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w800,
+                  color: YarisTheme.ink,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: _muted),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F1EA),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.location_on_rounded,
+                      size: 13,
+                      color: _parkingGreen,
+                    ),
+                    SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        'Google 地图',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: YarisTheme.ink,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          const Divider(height: 1, color: _homeBorder),
-          const SizedBox(height: 4),
-          Row(
+        ),
+      ),
+    );
+  }
+
+  Widget _musicCard() => Material(
+    color: _homeSurface,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(24),
+      side: const BorderSide(color: _homeBorder),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: onMusic,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: MusicArtwork(
+                    url: session.homeMusicCoverUrl,
+                    size: 52,
+                    icon: CupertinoIcons.music_note,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        session.homeMusicState,
+                        style: const TextStyle(
+                          color: _homeAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        session.homeMusicTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: YarisTheme.ink,
+                        ),
+                      ),
+                      if (session.homeMusicDetail.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          session.homeMusicDetail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, color: _muted),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 15,
+                  color: _muted,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Divider(height: 1, color: _homeBorder),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _control('上一曲', CupertinoIcons.backward_end_fill, onPrevious),
@@ -419,80 +749,9 @@ class _HomePage extends StatelessWidget {
               ),
             ],
           ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _destinationCard() => Material(
-    color: _homeSurface,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(24),
-      side: const BorderSide(color: _homeBorder),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
-      onTap: onDriving,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            _sectionIcon(CupertinoIcons.location_north_fill),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '目的地',
-                    style: TextStyle(
-                      color: _homeAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    session.homeDestinationTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: YarisTheme.ink,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    session.lastTask.isNotEmpty && !session.navigationVerified
-                        ? '状态待核对 · ${session.homeDestinationDetail}'
-                        : session.lastTask.isEmpty
-                        ? session.homeDestinationDetail
-                        : '${session.taskLabel} · ${session.homeDestinationDetail}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: _muted),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(CupertinoIcons.chevron_right, size: 15, color: _muted),
-          ],
         ),
-      ),
+      ],
     ),
-  );
-
-  Widget _sectionIcon(IconData icon) => Container(
-    width: 44,
-    height: 44,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: YarisTheme.periwinkle,
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Icon(icon, size: 19, color: _homeAccent),
   );
 
   Widget _control(
@@ -510,6 +769,49 @@ class _HomePage extends StatelessWidget {
       backgroundColor: primary ? _homeAccent : Colors.transparent,
     ),
   );
+}
+
+class _FuelRingPainter extends CustomPainter {
+  const _FuelRingPainter({
+    required this.fraction,
+    required this.activeColor,
+    required this.trackColor,
+  });
+
+  final double? fraction;
+  final Color activeColor;
+  final Color trackColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = 7.5;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (math.min(size.width, size.height) - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    final trackPaint = Paint()
+      ..color = trackColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawCircle(center, radius, trackPaint);
+
+    if (fraction != null && fraction! > 0) {
+      final activePaint = Paint()
+        ..color = activeColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round;
+      final sweep = 2 * math.pi * fraction!.clamp(0.02, 1.0);
+      canvas.drawArc(rect, -math.pi / 2, sweep, false, activePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FuelRingPainter old) =>
+      old.fraction != fraction ||
+      old.activeColor != activeColor ||
+      old.trackColor != trackColor;
 }
 
 Widget _badge(

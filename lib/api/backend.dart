@@ -1426,12 +1426,20 @@ class BackendSession extends ChangeNotifier {
       currentTrack = {};
       return;
     }
-    if (knownTracks.containsKey(id)) {
+    bool isPlaceholder(Map<String, dynamic> t) {
+      final title = _nonempty(t['title']) ?? '';
+      final artist = _nonempty(t['artist']) ?? '';
+      return title.isEmpty ||
+          title.startsWith('Netease Track ') ||
+          title.startsWith('Track ') ||
+          artist == 'Netease Cloud Music';
+    }
+    if (knownTracks.containsKey(id) && !isPlaceholder(knownTracks[id]!)) {
       currentTrack = knownTracks[id]!;
       return;
     }
     if (currentTrack['track_id'] != id) currentTrack = {'track_id': id};
-    if (currentTrack['metadata_loaded'] == true ||
+    if ((currentTrack['metadata_loaded'] == true && !isPlaceholder(currentTrack)) ||
         _metadataRequest == id ||
         _metadataFailedId == id &&
             _metadataRetryAt != null &&
@@ -1458,7 +1466,10 @@ class BackendSession extends ChangeNotifier {
         return;
       }
       if (data['track_id'] != id) throw ApiFailure('曲目信息与车机状态不匹配');
-      currentTrack = {...data, 'metadata_loaded': true};
+      currentTrack = {...data, 'metadata_loaded': !isPlaceholder(data)};
+      if (!isPlaceholder(data)) {
+        knownTracks[id] = currentTrack;
+      }
       _metadataFailedId = null;
       _metadataRetryAt = null;
     } catch (_) {
@@ -1481,6 +1492,86 @@ class BackendSession extends ChangeNotifier {
   }
 
   String? _metadataRequestKey;
+  Map<String, dynamic> vehicleState = {};
+  DateTime? _vehicleStateFetchedAt;
+
+  Future<void> refreshVehicleState({bool force = false}) async {
+    if (disposed || !api.configured || !canControlVehicle) return;
+    if (!force &&
+        _vehicleStateFetchedAt != null &&
+        DateTime.now().difference(_vehicleStateFetchedAt!) <
+            const Duration(seconds: 20)) {
+      return;
+    }
+    final gen = generation,
+        token = api.token,
+        base = api.baseUrl,
+        device = api.deviceId;
+    try {
+      final data = await api.fetchVehicleState(deviceId: device);
+      if (disposed ||
+          gen != generation ||
+          token != api.token ||
+          base != api.baseUrl ||
+          device != api.deviceId) {
+        return;
+      }
+      vehicleState = data;
+      _vehicleStateFetchedAt = DateTime.now();
+      publish();
+    } catch (_) {
+      // Vehicle telemetry refresh is best-effort and never blocks home sync.
+    }
+  }
+
+  double? get homeFuelPercent {
+    final s = vehicleState['state'];
+    if (s is! Map) return null;
+    final raw = s['fuel_level_percent'];
+    if (raw is num && raw.isFinite) return raw.toDouble().clamp(0.0, 100.0);
+    return null;
+  }
+
+  double? get homeFuelLiters {
+    final s = vehicleState['state'];
+    if (s is! Map) return null;
+    final raw = s['fuel_level_liters'];
+    if (raw is num && raw.isFinite) return raw.toDouble();
+    return null;
+  }
+
+  double? get homeAvgKmPerL {
+    final s = vehicleState['state'];
+    if (s is! Map) return null;
+    final raw = s['avg_fuel_consumption_l_100km'];
+    if (raw is num && raw.isFinite && raw > 0.1) {
+      return 100.0 / raw.toDouble();
+    }
+    return null;
+  }
+
+  double? get homeEstimatedRangeKm {
+    final s = vehicleState['state'];
+    if (s is! Map) return null;
+    final raw = s['estimated_range_km'];
+    if (raw is num && raw.isFinite && raw > 0) return raw.toDouble();
+    final pct = homeFuelPercent;
+    final kmPerL = homeAvgKmPerL;
+    if (pct != null && kmPerL != null) {
+      return (pct / 100.0) * 36.0 * kmPerL;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? get homeParking {
+    final p = vehicleState['parking'];
+    if (p is Map) return Map<String, dynamic>.from(p);
+    return null;
+  }
+
+  String? get homeMusicCoverUrl => _hub?.phoneTarget == true
+      ? _hub!.view.coverUrl
+      : _nonempty(currentTrack['cover_url']);
 
   String get homeDestinationTitle => lastTask.isEmpty
       ? '暂无目的地'
@@ -1582,6 +1673,7 @@ class BackendSession extends ChangeNotifier {
     } finally {
       if (gen == generation && backendOnline == true && !disposed) {
         await refreshNavigationTask();
+        unawaited(refreshVehicleState());
       }
       refreshing = false;
       publish();

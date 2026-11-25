@@ -204,6 +204,18 @@ void main() {
         'status': 'queued',
       };
       s.navigationVerified = true;
+      s.vehicleState = {
+        'state': {
+          'fuel_level_percent': 72.0,
+          'estimated_range_km': 540.0,
+          'avg_fuel_consumption_l_100km': 3.5,
+        },
+        'parking': {
+          'latitude': 35.5625,
+          'longitude': 139.7160,
+          'parked_at': '2026-11-25T21:40:00+09:00',
+        },
+      };
       s.currentTrack = {
         'track_id': 'netease_42',
         'title': '测试真实曲名',
@@ -217,7 +229,9 @@ void main() {
         MaterialApp(home: YarisShell(session: s, initializeSession: false)),
       );
       await tester.pumpAndSettle();
-      expect(find.text('测试目的地'), findsOneWidget);
+      expect(find.text('油量与续航'), findsOneWidget);
+      expect(find.text('72%'), findsOneWidget);
+      expect(find.text('导航寻车'), findsOneWidget);
       expect(find.text('测试真实曲名'), findsOneWidget);
       expect(find.text('状态待更新'), findsOneWidget);
       final decorations = tester.widgetList<DecoratedBox>(

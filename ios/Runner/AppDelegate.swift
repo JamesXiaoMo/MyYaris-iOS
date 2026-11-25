@@ -28,6 +28,29 @@ import UniformTypeIdentifiers
     localAudio = YarisLocalAudio(messenger: engineBridge.applicationRegistrar.messenger())
     let shareChannel = FlutterMethodChannel(name: "io.myyaris/share", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     shareChannel.setMethodCallHandler { call, result in
+      if call.method == "openGoogleMapsNavigation" {
+        guard let args = call.arguments as? [String: Any],
+              let latNum = args["lat"] as? NSNumber,
+              let lngNum = args["lng"] as? NSNumber else {
+          result(false)
+          return
+        }
+        let lat = latNum.doubleValue
+        let lng = lngNum.doubleValue
+        let mode = (args["mode"] as? String) ?? "walking"
+        DispatchQueue.main.async {
+          let appUrlStr = String(format: "comgooglemaps://?daddr=%.6f,%.6f&directionsmode=%@", lat, lng, mode)
+          let webUrlStr = String(format: "https://www.google.com/maps/dir/?api=1&destination=%.6f,%.6f&travelmode=%@", lat, lng, mode)
+          if let appUrl = URL(string: appUrlStr), UIApplication.shared.canOpenURL(appUrl) {
+            UIApplication.shared.open(appUrl, options: [:]) { ok in result(ok) }
+          } else if let webUrl = URL(string: webUrlStr) {
+            UIApplication.shared.open(webUrl, options: [:]) { ok in result(ok) }
+          } else {
+            result(false)
+          }
+        }
+        return
+      }
       if call.method == "renderSatelliteRouteSnapshot" {
         guard let args = call.arguments as? [String: Any],
               let rawPoints = args["points"] as? [[String: Any]] else {
