@@ -15,11 +15,13 @@ class DrivingFavoritesDrawer extends StatefulWidget {
     required this.controller,
     required this.onSelected,
     this.selection,
+    this.onMapPinsChanged,
   });
   final BackendSession session;
   final ScrollController controller;
   final ValueChanged<Favorite> onSelected;
   final MapSelection? selection;
+  final ValueChanged<List<Map<String, dynamic>>>? onMapPinsChanged;
   @override
   State<DrivingFavoritesDrawer> createState() => _DrivingFavoritesDrawerState();
 }
@@ -28,6 +30,7 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
   final search = TextEditingController();
   late final library = FavoriteLibrary(widget.session);
   late String identity;
+  int _pinSyncEpoch = 0;
   @override
   void initState() {
     super.initState();
@@ -44,6 +47,45 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
       search.clear();
     }
     setState(() {});
+    _syncMapPins();
+  }
+
+  List<Map<String, dynamic>> _favoritesToPins(List<Favorite> list) {
+    final pins = <Map<String, dynamic>>[];
+    for (final item in list) {
+      if (item.coordSystem != 'wgs84') continue;
+      pins.add({
+        'id': item.id,
+        'title': item.displayName,
+        'subtitle': item.folderName ?? (item.address.isNotEmpty ? item.address : '未分类'),
+        'address': item.address,
+        'latitude': item.latitude,
+        'longitude': item.longitude,
+        'color': folderColorHexFor(item.folderId),
+      });
+    }
+    return pins;
+  }
+
+  Future<void> _syncMapPins() async {
+    final cb = widget.onMapPinsChanged;
+    if (cb == null || library.busy) return;
+    final epoch = ++_pinSyncEpoch;
+    // When viewing a specific folder or search filter, show the exact visible items
+    if (library.folderId != null || library.search.isNotEmpty) {
+      cb(_favoritesToPins(library.items));
+      return;
+    }
+    // When viewing "全部" (root), fetch all saved favorites across all folders so every
+    // folder's saved places appear color-coded on the map simultaneously!
+    try {
+      final all = await FavoritesApi(widget.session.api).list();
+      if (!mounted || epoch != _pinSyncEpoch) return;
+      cb(_favoritesToPins(all));
+    } catch (_) {
+      if (!mounted || epoch != _pinSyncEpoch) return;
+      cb(_favoritesToPins(library.items));
+    }
   }
 
   void scrolled() {
@@ -349,7 +391,19 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
             ),
           for (final item in library.items)
             ListTile(
-              leading: const Icon(Icons.place_outlined),
+              leading: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: folderColorFor(item.folderId).withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.place_rounded,
+                  color: folderColorFor(item.folderId),
+                  size: 19,
+                ),
+              ),
               title: Text(item.displayName),
               subtitle: Text(
                 [

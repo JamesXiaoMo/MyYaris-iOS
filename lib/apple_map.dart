@@ -86,6 +86,17 @@ class AppleMapController {
     }
   }
 
+  List<Map<String, dynamic>>? _pendingFavoritePins;
+
+  Future<void> setFavoritePins(List<Map<String, dynamic>> pins) async {
+    _pendingFavoritePins = pins;
+    try {
+      await channel?.invokeMethod<void>('setFavoritePins', pins);
+    } on PlatformException {
+      /* The map may not be ready yet. */
+    }
+  }
+
   Future<void> setScrubMarker({double? latitude, double? longitude}) async {
     try {
       if (latitude == null || longitude == null) {
@@ -228,6 +239,10 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
   void created(int id) {
     channel = MethodChannel('io.myyaris/map/$id');
     widget.controller?.channel = channel;
+    final pendingPins = widget.controller?._pendingFavoritePins;
+    if (pendingPins != null) {
+      channel!.invokeMethod<void>('setFavoritePins', pendingPins);
+    }
     channel!.setMethodCallHandler((call) async {
       if (!mounted) return;
       if (call.method == 'selected' && call.arguments is Map) {
@@ -240,7 +255,22 @@ class _AppleMapState extends State<AppleMap> with WidgetsBindingObserver {
             lon.isFinite &&
             lat.abs() <= 90 &&
             lon.abs() <= 180) {
-          widget.onSelected(MapSelection(lat.toDouble(), lon.toDouble()));
+          final pinTitle = args['title'] is String &&
+                  (args['title'] as String).isNotEmpty
+              ? args['title'] as String
+              : '地图选点';
+          final pinAddr = args['address'] is String &&
+                  (args['address'] as String).isNotEmpty
+              ? args['address'] as String
+              : null;
+          widget.onSelected(
+            MapSelection(
+              lat.toDouble(),
+              lon.toDouble(),
+              title: pinTitle,
+              address: pinAddr,
+            ),
+          );
         }
       } else if (call.method == 'ready') {
         timer?.cancel();

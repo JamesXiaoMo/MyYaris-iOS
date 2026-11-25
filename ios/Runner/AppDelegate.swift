@@ -444,6 +444,11 @@ private final class YarisMapFactory: NSObject, FlutterPlatformViewFactory {
 private final class YarisSelectionTap: UITapGestureRecognizer {
   override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 }
+private final class YarisPlacePin: MKPointAnnotation {
+  var colorHex: String = "#64748B"
+  var placeAddress: String = ""
+}
+
 private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelegate, UIGestureRecognizerDelegate, CLLocationManagerDelegate {
   private let map: MKMapView
   private let channel: FlutterMethodChannel
@@ -457,6 +462,8 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
   private var locationTimer: Timer?
   private var searchResult: FlutterResult?
   private var search: MKLocalSearch?
+  private var favoritePins: [YarisPlacePin] = []
+  private var selectionPin: MKPointAnnotation?
   init(frame: CGRect, id: Int64, messenger: FlutterBinaryMessenger) {
     map = MKMapView(frame: frame)
     channel = FlutterMethodChannel(name: "io.myyaris/map/\(id)", binaryMessenger: messenger)
@@ -519,6 +526,9 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
         result(nil)
       case "setScrubMarker":
         self.applyScrubMarker(call.arguments as? [String: Any])
+        result(nil)
+      case "setFavoritePins":
+        self.applyFavoritePins(call.arguments as? [[String: Any]] ?? [])
         result(nil)
       case "dispose": self.release(); result(nil)
       default: result(FlutterMethodNotImplemented)
@@ -616,9 +626,83 @@ private final class YarisMapView: NSObject, FlutterPlatformView, MKMapViewDelega
   }
   func view() -> UIView { map }
   private func pin(_ c: CLLocationCoordinate2D, title: String) {
-    map.removeAnnotations(map.annotations.filter { !($0 is MKUserLocation) })
+    if let existing = selectionPin {
+      map.removeAnnotation(existing)
+      selectionPin = nil
+    }
     let mark = MKPointAnnotation(); mark.coordinate = c; mark.title = title
+    selectionPin = mark
     map.addAnnotation(mark)
+  }
+
+  private func uiColor(fromHex hex: String) -> UIColor {
+    var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    if cleaned.hasPrefix("#") { cleaned.removeFirst() }
+    guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else {
+      return UIColor(red: 100/255, green: 116/255, blue: 139/255, alpha: 1.0)
+    }
+    return UIColor(
+      red: CGFloat((rgb >> 16) & 0xFF) / 255.0,
+      green: CGFloat((rgb >> 8) & 0xFF) / 255.0,
+      blue: CGFloat(rgb & 0xFF) / 255.0,
+      alpha: 1.0
+    )
+  }
+
+  private func applyFavoritePins(_ items: [[String: Any]]) {
+    if !favoritePins.isEmpty {
+      map.removeAnnotations(favoritePins)
+      favoritePins.removeAll()
+    }
+    var added: [YarisPlacePin] = []
+    added.reserveCapacity(items.count)
+    for item in items {
+      guard let lat = (item["latitude"] as? NSNumber)?.doubleValue,
+            let lon = (item["longitude"] as? NSNumber)?.doubleValue,
+            lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180,
+            !(lat == 0 && lon == 0) else { continue }
+      let pin = YarisPlacePin()
+      pin.coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+      pin.title = (item["title"] as? String) ?? "收藏地点"
+      pin.subtitle = (item["subtitle"] as? String) ?? ""
+      pin.placeAddress = (item["address"] as? String) ?? ""
+      pin.colorHex = (item["color"] as? String) ?? "#64748B"
+      added.append(pin)
+    }
+    favoritePins = added
+    if !added.isEmpty {
+      map.addAnnotations(added)
+    }
+  }
+
+  func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+    if annotation is MKUserLocation { return nil }
+    if let place = annotation as? YarisPlacePin {
+      let reuseId = "yaris_favorite_pin"
+      let view = (mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView)
+        ?? MKMarkerAnnotationView(annotation: place, reuseIdentifier: reuseId)
+      view.annotation = place
+      view.markerTintColor = uiColor(fromHex: place.colorHex)
+      view.glyphImage = UIImage(systemName: "mappin")
+      view.canShowCallout = true
+      view.titleVisibility = .adaptive
+      view.subtitleVisibility = .hidden
+      view.displayPriority = .defaultHigh
+      return view
+    }
+    return nil
+  }
+
+  func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+    guard !released, let place = view.annotation as? YarisPlacePin else { return }
+    cameraEpoch += 1
+    selectedCount += 1
+    channel.invokeMethod("selected", arguments: [
+      "latitude": place.coordinate.latitude,
+      "longitude": place.coordinate.longitude,
+      "title": place.title ?? "收藏地点",
+      "address": place.placeAddress
+    ])
   }
   // Observe only selection taps; MapKit remains the sole owner of pan/pinch.
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { gestureRecognizer is YarisSelectionTap }

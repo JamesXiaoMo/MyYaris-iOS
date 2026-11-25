@@ -710,6 +710,7 @@ class _NavigationPageState extends State<NavigationPage> {
                       session: widget.session,
                       controller: scroll,
                       selection: mapSelection,
+                      onMapPinsChanged: mapController.setFavoritePins,
                       onSelected: (favorite) => selectPoint(
                         MapSelection(
                           favorite.latitude,
