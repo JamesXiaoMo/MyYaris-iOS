@@ -2,30 +2,60 @@ import '../yaris_theme.dart';
 import 'package:flutter/material.dart';
 import 'favorites.dart';
 
-/// Harmonious Apple Maps-friendly palette for saved-place folders.
+/// High-contrast 12-color Apple Maps-friendly palette for saved-place folders.
 const List<Color> kFolderPalette = [
-  Color(0xFFD6323F), // Crimson
-  Color(0xFF2F6BFF), // Sapphire
-  Color(0xFF16A34A), // Emerald
-  Color(0xFFEA8C00), // Amber
-  Color(0xFF8B5CF6), // Violet
-  Color(0xFF0891B2), // Teal
-  Color(0xFFE11D74), // Rose
-  Color(0xFF4F46E5), // Indigo
+  Color(0xFFD6323F), // 0: Crimson Red
+  Color(0xFF2563EB), // 1: Royal Blue
+  Color(0xFF16A34A), // 2: Emerald Green
+  Color(0xFFEA8C00), // 3: Vivid Amber
+  Color(0xFF9333EA), // 4: Vivid Purple
+  Color(0xFF0891B2), // 5: Cyan Teal
+  Color(0xFFE11D74), // 6: Hot Rose
+  Color(0xFF65A30D), // 7: Lime Olive
+  Color(0xFFDC6803), // 8: Burnt Orange
+  Color(0xFF4F46E5), // 9: Deep Indigo
+  Color(0xFF0D9488), // 10: Seafoam Teal
+  Color(0xFFBE123C), // 11: Berry Wine
 ];
 
 const Color kUncategorizedFolderColor = Color(0xFF64748B);
 
-/// Returns a deterministic, visually distinct color for any folder ID.
+final Map<String, Color> _assignedFolderColors = <String, Color>{};
+
+/// Assigns guaranteed-distinct colors to every folder ID (collision-free up to 12 folders)
+/// in deterministic sorted order so colors remain stable across restarts.
+void syncFolderColorPalette(Iterable<String> folderIds) {
+  final unique = folderIds
+      .where((id) => id.isNotEmpty && id != 'uncategorized')
+      .toSet()
+      .toList()
+    ..sort();
+  if (unique.isEmpty) return;
+  for (var i = 0; i < unique.length; i++) {
+    _assignedFolderColors[unique[i]] =
+        kFolderPalette[i % kFolderPalette.length];
+  }
+}
+
+/// Returns a guaranteed-distinct color for any registered folder ID.
 Color folderColorFor(String? folderId) {
   if (folderId == null || folderId.isEmpty || folderId == 'uncategorized') {
     return kUncategorizedFolderColor;
   }
-  var hash = 0;
-  for (final code in folderId.codeUnits) {
-    hash = (hash * 31 + code) & 0x7FFFFFFF;
+  final assigned = _assignedFolderColors[folderId];
+  if (assigned != null) return assigned;
+  // Fallback before folder list loads: assign next unused palette color
+  final used = _assignedFolderColors.values.toSet();
+  for (final candidate in kFolderPalette) {
+    if (!used.contains(candidate)) {
+      _assignedFolderColors[folderId] = candidate;
+      return candidate;
+    }
   }
-  return kFolderPalette[hash % kFolderPalette.length];
+  final idx = _assignedFolderColors.length % kFolderPalette.length;
+  final fallback = kFolderPalette[idx];
+  _assignedFolderColors[folderId] = fallback;
+  return fallback;
 }
 
 /// Returns `#RRGGBB` hex string for native iOS MapKit marker tinting.

@@ -46,6 +46,7 @@ class _DrivingFavoritesDrawerState extends State<DrivingFavoritesDrawer> {
       identity = library.currentIdentity;
       search.clear();
     }
+    syncFolderColorPalette(library.folders.map((f) => f.id));
     setState(() {});
     _syncMapPins();
   }
