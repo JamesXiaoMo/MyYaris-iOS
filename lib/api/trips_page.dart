@@ -71,7 +71,7 @@ class TripTelemetrySeries {
   /// ordered trip points. Prefers reported GPS speed_kmh and falls back to
   /// Haversine delta / dt when speed_kmh is absent.
   static TripTelemetrySeries fromPoints(List<dynamic> rawPoints) {
-    final parsed = <({double lat, double lon, double? speed, DateTime time})>[];
+    final parsed = <({double lat, double lon, double? speed, double? acc, DateTime time})>[];
     for (final item in rawPoints) {
       if (item is! Map) continue;
       final lat = item['latitude'];
@@ -82,10 +82,15 @@ class TripTelemetrySeries {
       final spd = rawSpeed is num && rawSpeed.isFinite && rawSpeed >= 0 && rawSpeed <= 300
           ? rawSpeed.toDouble()
           : null;
+      final rawAcc = item['accuracy_m'];
+      final acc = rawAcc is num && rawAcc.isFinite && rawAcc >= 0
+          ? rawAcc.toDouble()
+          : null;
       parsed.add((
         lat: lat.toDouble(),
         lon: lon.toDouble(),
         speed: spd,
+        acc: acc,
         time: ts,
       ));
     }
@@ -103,17 +108,24 @@ class TripTelemetrySeries {
 
     final t0 = parsed.first.time;
     final speeds = <TripChartSample>[];
+    final isFallback = <bool>[];
     for (var i = 0; i < parsed.length; i++) {
       final p = parsed[i];
       final sec = p.time.difference(t0).inMilliseconds / 1000.0;
       double? v = p.speed;
+      var derived = false;
       if (v == null && i > 0) {
         final prev = parsed[i - 1];
         final dt = p.time.difference(prev.time).inMilliseconds / 1000.0;
-        if (dt >= 1.0 && dt <= 60.0) {
+        final coarseFix = (p.acc != null && p.acc! > 30.0) ||
+            (prev.acc != null && prev.acc! > 30.0);
+        if (!coarseFix && dt >= 1.0 && dt <= 60.0) {
           final meters = _haversineMeters(prev.lat, prev.lon, p.lat, p.lon);
           final kmh = (meters / dt) * 3.6;
-          if (kmh >= 0 && kmh <= 220.0) v = kmh;
+          if (kmh >= 0 && kmh <= 180.0) {
+            v = kmh;
+            derived = true;
+          }
         }
       }
       if (v != null) {
@@ -126,7 +138,31 @@ class TripTelemetrySeries {
             longitude: p.lon,
           ),
         );
+        isFallback.add(derived);
       }
+    }
+
+    // Filter isolated Haversine cold-start / GPS-jump spikes (>= 35 km/h above neighbors)
+    if (speeds.length >= 2) {
+      final cleaned = <TripChartSample>[];
+      for (var i = 0; i < speeds.length; i++) {
+        if (isFallback[i]) {
+          final v = speeds[i].value;
+          final prevV = i > 0 ? speeds[i - 1].value : null;
+          final nextV = i + 1 < speeds.length ? speeds[i + 1].value : null;
+          final spikeVsBoth = prevV != null &&
+              nextV != null &&
+              (v - prevV) >= 35.0 &&
+              (v - nextV) >= 35.0;
+          final spikeAtStart =
+              i <= 3 && nextV != null && (v - nextV) >= 35.0;
+          if (spikeVsBoth || spikeAtStart) continue;
+        }
+        cleaned.add(speeds[i]);
+      }
+      speeds
+        ..clear()
+        ..addAll(cleaned);
     }
 
     final accels = <TripChartSample>[];
