@@ -984,6 +984,8 @@ class BackendSession extends ChangeNotifier {
     statusReceivedAt = null;
     health = {};
     backendOnline = null;
+    vehicleState = {};
+    _vehicleStateFetchedAt = null;
   }
 
   Future<void> refreshUserProfile({bool resetDeviceDenied = false}) async {
@@ -1524,41 +1526,61 @@ class BackendSession extends ChangeNotifier {
     }
   }
 
+  Map<String, dynamic>? get _vehicleMetrics {
+    final nested = vehicleState['state'];
+    if (nested is Map) return Map<String, dynamic>.from(nested);
+    return vehicleState.isEmpty ? null : vehicleState;
+  }
+
   double? get homeFuelPercent {
-    final s = vehicleState['state'];
-    if (s is! Map) return null;
+    final s = _vehicleMetrics;
+    if (s == null) return null;
     final raw = s['fuel_level_percent'];
     if (raw is num && raw.isFinite) return raw.toDouble().clamp(0.0, 100.0);
     return null;
   }
 
   double? get homeFuelLiters {
-    final s = vehicleState['state'];
-    if (s is! Map) return null;
+    final s = _vehicleMetrics;
+    if (s == null) return null;
     final raw = s['fuel_level_liters'];
     if (raw is num && raw.isFinite) return raw.toDouble();
     return null;
   }
 
   double? get homeAvgKmPerL {
-    final s = vehicleState['state'];
-    if (s is! Map) return null;
+    final s = _vehicleMetrics;
+    if (s == null) return null;
     final raw = s['avg_fuel_consumption_l_100km'];
-    if (raw is num && raw.isFinite && raw > 0.1) {
+    if (raw is num && raw.isFinite && raw >= 2.0 && raw <= 30.0) {
       return 100.0 / raw.toDouble();
+    }
+    final dist = s['trip_distance_km'];
+    final fuel = s['total_fuel_consumed_liters'];
+    if (dist is num &&
+        fuel is num &&
+        dist.isFinite &&
+        fuel.isFinite &&
+        dist >= 0.5 &&
+        fuel >= 0.02) {
+      final kmPerL = dist.toDouble() / fuel.toDouble();
+      if (kmPerL >= 3.0 && kmPerL <= 60.0) return kmPerL;
     }
     return null;
   }
 
   double? get homeEstimatedRangeKm {
-    final s = vehicleState['state'];
-    if (s is! Map) return null;
+    final s = _vehicleMetrics;
+    if (s == null) return null;
     final raw = s['estimated_range_km'];
     if (raw is num && raw.isFinite && raw > 0) return raw.toDouble();
     final pct = homeFuelPercent;
     final kmPerL = homeAvgKmPerL;
+    final cap = (s['tank_capacity_liters'] is num && (s['tank_capacity_liters'] as num) > 0)
+        ? (s['tank_capacity_liters'] as num).toDouble()
+        : 36.0;
     if (pct != null && kmPerL != null) {
-      return (pct / 100.0) * 36.0 * kmPerL;
+      return (pct / 100.0) * cap * kmPerL;
     }
     return null;
   }
