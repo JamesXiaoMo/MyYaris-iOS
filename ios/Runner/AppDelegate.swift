@@ -6,17 +6,29 @@ import Flutter
 import UIKit
 import Security
 import UniformTypeIdentifiers
+import WidgetKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDocumentPickerDelegate {
   private var audioPickerResult: FlutterResult?
   private var localAudio: YarisLocalAudio?
   private var activeSnapshotter: MKMapSnapshotter?
+  private var parkingSnapshotter: MKMapSnapshotter?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    if #available(iOS 14.0, *) {
+      WidgetCenter.shared.reloadAllTimelines()
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func applicationDidBecomeActive(_ application: UIApplication) {
+    super.applicationDidBecomeActive(application)
+    if #available(iOS 14.0, *) {
+      WidgetCenter.shared.reloadAllTimelines()
+    }
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -28,6 +40,82 @@ import UniformTypeIdentifiers
     localAudio = YarisLocalAudio(messenger: engineBridge.applicationRegistrar.messenger())
     let shareChannel = FlutterMethodChannel(name: "io.myyaris/share", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     shareChannel.setMethodCallHandler { call, result in
+      if call.method == "renderParkingCardSnapshot" {
+        guard let args = call.arguments as? [String: Any],
+              let latNum = args["lat"] as? NSNumber,
+              let lngNum = args["lng"] as? NSNumber else {
+          result(nil)
+          return
+        }
+        let lat = latNum.doubleValue
+        let lng = lngNum.doubleValue
+        guard lat.isFinite, lng.isFinite, abs(lat) <= 90, abs(lng) <= 180, !(lat == 0 && lng == 0) else {
+          result(nil)
+          return
+        }
+        let width = (args["width"] as? NSNumber)?.doubleValue ?? 180.0
+        let height = (args["height"] as? NSNumber)?.doubleValue ?? 180.0
+        let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        // Shift camera slightly south so the car pin sits in the upper 60% above the frosted footer bar
+        let shiftedCenter = CLLocationCoordinate2D(latitude: lat - 0.00045, longitude: lng)
+        let options = MKMapSnapshotter.Options()
+        options.region = MKCoordinateRegion(center: shiftedCenter, latitudinalMeters: 420, longitudinalMeters: 420)
+        options.size = CGSize(width: width, height: height)
+        options.scale = 3.0
+        options.mapType = .standard
+        options.showsBuildings = true
+        options.traitCollection = UITraitCollection(userInterfaceStyle: .light)
+
+        self.parkingSnapshotter?.cancel()
+        let snap = MKMapSnapshotter(options: options)
+        self.parkingSnapshotter = snap
+        snap.start(with: DispatchQueue.main) { [weak self] snapshot, error in
+          self?.parkingSnapshotter = nil
+          guard let snapshot = snapshot, error == nil else {
+            result(nil)
+            return
+          }
+          let pt = snapshot.point(for: coord)
+          let fmt = UIGraphicsImageRendererFormat()
+          fmt.scale = 3.0
+          fmt.opaque = true
+          let renderer = UIGraphicsImageRenderer(size: options.size, format: fmt)
+          let img = renderer.image { ctx in
+            let cg = ctx.cgContext
+            snapshot.image.draw(at: .zero)
+
+            // Outer soft crimson radar halo
+            cg.setFillColor(UIColor(red: 168/255, green: 47/255, blue: 54/255, alpha: 0.16).cgColor)
+            cg.fillEllipse(in: CGRect(x: pt.x - 24, y: pt.y - 24, width: 48, height: 48))
+
+            // Inner crimson halo
+            cg.setFillColor(UIColor(red: 168/255, green: 47/255, blue: 54/255, alpha: 0.28).cgColor)
+            cg.fillEllipse(in: CGRect(x: pt.x - 15, y: pt.y - 15, width: 30, height: 30))
+
+            // White ring with soft shadow
+            cg.saveGState()
+            cg.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 4, color: UIColor.black.withAlphaComponent(0.25).cgColor)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillEllipse(in: CGRect(x: pt.x - 11, y: pt.y - 11, width: 22, height: 22))
+            cg.restoreGState()
+
+            // Crimson core
+            cg.setFillColor(UIColor(red: 168/255, green: 47/255, blue: 54/255, alpha: 1.0).cgColor)
+            cg.fillEllipse(in: CGRect(x: pt.x - 8.5, y: pt.y - 8.5, width: 17, height: 17))
+
+            // Crisp white car glyph centered
+            if let carImg = UIImage(systemName: "car.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+              carImg.draw(in: CGRect(x: pt.x - 5.5, y: pt.y - 4.5, width: 11, height: 9))
+            }
+          }
+          if let png = img.pngData() {
+            result(FlutterStandardTypedData(bytes: png))
+          } else {
+            result(nil)
+          }
+        }
+        return
+      }
       if call.method == "openGoogleMapsNavigation" {
         guard let args = call.arguments as? [String: Any],
               let latNum = args["lat"] as? NSNumber,
