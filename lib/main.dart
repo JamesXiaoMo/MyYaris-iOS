@@ -433,7 +433,10 @@ class _HomePage extends StatelessWidget {
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => VehicleDataPage(session: session),
+              builder: (_) => VehicleDataPage(
+                session: session,
+                initialTrendTab: 1,
+              ),
             ),
           );
         },
@@ -750,6 +753,10 @@ class _ParkingMapCardState extends State<_ParkingMapCard> {
         !lat.isFinite ||
         !lng.isFinite ||
         (lat == 0 && lng == 0)) {
+      if (_mapBytes != null || _loadedKey != null) {
+        if (mounted) setState(() => _mapBytes = null);
+        _loadedKey = null;
+      }
       return;
     }
     final key = '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
@@ -762,8 +769,12 @@ class _ParkingMapCardState extends State<_ParkingMapCard> {
       );
       if (mounted && _loadedKey == key && bytes != null && bytes.isNotEmpty) {
         setState(() => _mapBytes = bytes);
+      } else if (_loadedKey == key) {
+        _loadedKey = null;
       }
-    } catch (_) {}
+    } catch (_) {
+      if (_loadedKey == key) _loadedKey = null;
+    }
   }
 
   @override

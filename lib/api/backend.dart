@@ -719,6 +719,20 @@ class BackendApi {
     );
   }
 
+  Future<Map<String, dynamic>> fetchFuelHistory({
+    int days = 30,
+    String? deviceId,
+  }) {
+    return call(
+      'GET',
+      '/api/v1/vehicle/fuel-history',
+      query: {
+        'days': '$days',
+        'device_id': deviceId ?? this.deviceId,
+      },
+    );
+  }
+
   Future<void> deleteTrip(String tripId) async {
     final encoded = Uri.encodeComponent(tripId);
     await call('DELETE', '/api/v1/trips/$encoded');

@@ -8,8 +8,13 @@ const _statusGreen = Color(0xFF1E8E5A);
 /// Dedicated OBD-II & Vehicle Telemetry inspection page displaying all persisted
 /// vehicle metrics, interactive historical trend charts, and last parking location.
 class VehicleDataPage extends StatefulWidget {
-  const VehicleDataPage({super.key, required this.session});
+  const VehicleDataPage({
+    super.key,
+    required this.session,
+    this.initialTrendTab = 0,
+  });
   final BackendSession session;
+  final int initialTrendTab;
 
   @override
   State<VehicleDataPage> createState() => _VehicleDataPageState();
@@ -18,14 +23,16 @@ class VehicleDataPage extends StatefulWidget {
 class _VehicleDataPageState extends State<VehicleDataPage> {
   Map<String, dynamic>? _state;
   List<Map<String, dynamic>> _history = const [];
+  List<Map<String, dynamic>> _fuelHistory30d = const [];
   bool _loading = true;
   String? _error;
-  int _trendTab = 0; // 0: 12V电压, 1: 剩余油量, 2: 混动SOC, 3: 冷却水温
+  late int _trendTab; // 0: 12V电压, 1: 剩余油量(近30天), 2: 混动SOC, 3: 冷却水温
   int? _scrubIdx;
 
   @override
   void initState() {
     super.initState();
+    _trendTab = widget.initialTrendTab.clamp(0, 3);
     _load();
   }
 
@@ -38,6 +45,9 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
       final results = await Future.wait([
         widget.session.api.fetchVehicleState(),
         widget.session.api.fetchVehicleHistory(limit: 120),
+        widget.session.api
+            .fetchFuelHistory(days: 30)
+            .catchError((_) => const <String, dynamic>{}),
       ]);
       if (!mounted) return;
       final state = results[0];
@@ -48,9 +58,17 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
                 if (item is Map) Map<String, dynamic>.from(item),
             ]
           : <Map<String, dynamic>>[];
+      final rawFuel = results[2]['items'];
+      final fuel30d = rawFuel is List
+          ? [
+              for (final item in rawFuel)
+                if (item is Map) Map<String, dynamic>.from(item),
+            ]
+          : <Map<String, dynamic>>[];
       setState(() {
         _state = state;
         _history = hist;
+        _fuelHistory30d = fuel30d;
         _scrubIdx = null;
         _loading = false;
       });
@@ -78,6 +96,17 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
   }
 
   List<({DateTime time, double value})> _currentTrendPoints() {
+    if (_trendTab == 1 && _fuelHistory30d.isNotEmpty) {
+      final pts = <({DateTime time, double value})>[];
+      for (final row in _fuelHistory30d) {
+        final v = row['fuel_level_liters'];
+        final ts = DateTime.tryParse('${row['recorded_at'] ?? ''}');
+        if (v is num && v.isFinite && ts != null) {
+          pts.add((time: ts, value: v.toDouble()));
+        }
+      }
+      if (pts.isNotEmpty) return pts;
+    }
     final field = switch (_trendTab) {
       0 => 'aux_12v_voltage',
       1 => 'fuel_level_liters',
@@ -299,7 +328,7 @@ class _VehicleDataPageState extends State<VehicleDataPage> {
               children: [
                 for (final entry in const [
                   (0, '12V 电压'),
-                  (1, '剩余油量'),
+                  (1, '剩余油量 (30天)'),
                   (2, '混动 SOC'),
                   (3, '冷却水温'),
                 ])
